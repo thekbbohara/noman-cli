@@ -20,6 +20,7 @@ The Tool Bus is the execution layer that:
 - Tracks tool costs and performance
 - Enables extensibility (user + agent-authored tools)
 
+
 ### 1.2 Key Principles
 
 | Principle | Description | Rationale |
