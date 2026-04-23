@@ -1,18 +1,186 @@
-```
-# Logs and temp files
+```markdown
+# Documentation files
+*.md
+*.rst
+*.txt
+
+# Logs and temporary files
 *.log
 *.tmp
+*.temp
 *.swp
+*.swo
 
-# Environment
+# OS generated files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Icon?
+.directory
+*.nib
+*~
+.DS_Store?
+._*
+
+# Environment variables
 .env
 .env.local
-.env.
+.env.*
+!.env.example
 
-# Editors
+# IDE specific files
 .vscode/
 .idea/
+*.swp
+*.swo
 
-# Original rules preserved
-*.log
+# Build and distribution artifacts
+dist/
+build/
+target/
+out/
+_output/
+
+# Dependencies
+node_modules/
+vendor/
+deps/
+.PATH
+.libs
+include/
+
+# Python specific
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Compiled files
+*.o
+*.obj
+*.exe
+*.dll
+*.so
+*.a
+*.dylib
+*.jar
+*.class
+
+# Coverage reports
+coverage/
+htmlcov/
+.coverage
+*.cover
+coverage.xml
+*.gcov
+*.lcov
+
+# Testing
+*.test
+*.tests
+test/
+tests/
+
+# Compressed files
+*.zip
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.gz
+*.rar
+*.7z
+*.bz2
+*.xz
+*.tgz
+*.tar
+*.z
+*.Z
+*.lzma
+*.tlz
+*.txz
+*.taz
+*.war
+*.mar
+*.sfs
+*.cake
+*.gem
+*.gemspec
+*.box
+*.dmg
+*.iso
+*.img
+*.bin
+*.dat
+*.dump
+*.dump.ldb
+*.dump.log
+*.dump.meta
+*.dump.state
+*.dump.stats
+*.dump.summary
+*.dump.trace
+*.dump.xml
+*.dump.yaml
+*.dump.yml
+*.dump.json
+*.dump.toml
+*.dump.ini
+*.dump.cfg
+*.dump.conf
+*.dump.properties
+*.dump.env
+*.dump.settings
+*.dump.config
+*.dumprc
+*.dumpignore
+*.dumpfile
+*.dumpdata
+*.dumpinfo
+*.dumplog
+*.dumpstat
+*.dumptrace
+*.dumpxml
+*.dumpyaml
+*.dumpyml
+*.dumpjson
+*.dumptoml
+*.dumpini
+*.dumpcfg
+*.dumpconf
+*.dumpproperties
+*.dumpenv
+*.dumpsettings
+*.dumpconfig
+*.dumpstate
+*.dumpstats
+*.dumpsummary
+*.dumptrace
+*.dumpxml
+*.dumpyaml
+*.dumpyml
+*.dumpjson
+*.dumptoml
+*.dumpini
+*.dumpcfg
+*.dumpconf
+*.dumpproperties
+*.dumpenv
+*.dumpsettings
+*.dumpconfig
 ```
