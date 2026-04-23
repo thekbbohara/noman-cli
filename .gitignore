@@ -1,1 +1,4 @@
-Nothing should be ignored based on the provided file changes. The only modified file is 'tools.md', which is a markdown documentation file and should not be added to .gitignore.
+```
+# Plans directory - documentation files
+plans/
+```
