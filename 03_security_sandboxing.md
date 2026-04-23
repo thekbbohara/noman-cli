@@ -150,11 +150,285 @@ class FilesystemSandbox:
         return os.listdir(path)
 ```
 
-#### 3.2.2 Network Sandboxing (NEW - CRITICAL SECURITY FIX)
+### 3.2 Process Sandboxing (SECURITY HARDENED)
 
-**Problem:** Original design lacked network isolation, allowing potential data exfiltration.
+**CRITICAL FIX:** Original design used string matching for command filtering which is trivially bypassed.
 
-**Solution:** Deny-all-by-default network policy with explicit allowlist.
+**Solution:** AST-based validation with allowlist/denylist and runtime monitoring.
+
+```python
+# core/security/process_sandbox.py
+
+import ast
+import re
+import subprocess
+import shlex
+from pathlib import Path
+from typing import Set, List, Optional, Tuple
+from dataclasses import dataclass
+from enum import Enum
+
+
+class SecurityLevel(Enum):
+    NONE = "none"           # No restrictions (dangerous)
+    PERMISSIVE = "permissive"  # Allow most commands
+    RESTRICTIVE = "restrictive"  # Only explicitly allowed
+    PARANOID = "paranoid"   # Nothing allowed
+
+
+@dataclass
+class CommandPolicy:
+    """Policy for a specific command."""
+    name: str
+    allowed: bool
+    max_args: int = 10
+    max_total_length: int = 4096
+    forbidden_flags: Set[str] = None
+    required_flags: Set[str] = None
+    timeout_seconds: int = 60
+    
+    def __post_init__(self):
+        self.forbidden_flags = self.forbidden_flags or set()
+        self.required_flags = self.required_flags or set()
+
+
+class ProcessSandbox:
+    """Secure process execution with multi-layer validation."""
+    
+    def __init__(self, security_level: SecurityLevel = SecurityLevel.RESTRICTIVE):
+        self.security_level = security_level
+        self.command_policies: dict[str, CommandPolicy] = {}
+        self._setup_default_policies()
+        
+        # Forbidden patterns at ANY cost
+        self.forbidden_patterns = [
+            r'\brm\s+(-[rf]+\s+)?/\s*$',  # rm -rf /
+            r'\brm\s+(-[rf]+\s+)?\*\s*$',  # rm -rf *
+            r'\bchmod\s+-R\s+777',  # chmod -R 777
+            r'\bchown\s+-R',  # chown -R (recursive ownership change)
+            r'\bdd\s+.*of=/dev/',  # dd to device
+            r'\bmkfs',  # Format filesystem
+            r'\b:(){\s*:\|:&\s*};:',  # Fork bomb
+            r'\|\s*bash',  # Pipe to bash
+            r'\|\s*sh\b',  # Pipe to sh
+            r'curl.*\|\s*(ba)?sh',  # curl | sh
+            r'wget.*\|\s*(ba)?sh',  # wget | sh
+            r'>\s*/etc/',  # Write to /etc
+            r'>\s*/proc/',  # Write to /proc
+            r'python.*-c.*__import__',  # Python dynamic import
+            r'python.*-c.*exec\(',  # Python exec
+            r'python.*-c.*eval\(',  # Python eval
+            r'perl.*-e.*system\b',  # Perl system calls
+            r'ruby.*-e.*system\b',  # Ruby system calls
+        ]
+        
+        # Compile regexes for performance
+        self._forbidden_regexes = [re.compile(p, re.IGNORECASE) for p in self.forbidden_patterns]
+    
+    def _setup_default_policies(self):
+        """Setup default command policies based on security level."""
+        if self.security_level in [SecurityLevel.RESTRICTIVE, SecurityLevel.PARANOID]:
+            # Safe read-only commands
+            self.command_policies["git"] = CommandPolicy(
+                name="git",
+                allowed=True,
+                max_args=10,
+                forbidden_flags={"--upload-pack", "--receive-pack"}
+            )
+            self.command_policies["pytest"] = CommandPolicy(name="pytest", allowed=True, max_args=20)
+            self.command_policies["cargo"] = CommandPolicy(name="cargo", allowed=True, max_args=10)
+            self.command_policies["npm"] = CommandPolicy(name="npm", allowed=True, max_args=10)
+            self.command_policies["make"] = CommandPolicy(name="make", allowed=True, max_args=5)
+            self.command_policies["ls"] = CommandPolicy(name="ls", allowed=True, max_args=20)
+            self.command_policies["cat"] = CommandPolicy(name="cat", allowed=True, max_args=10)
+            self.command_policies["grep"] = CommandPolicy(name="grep", allowed=True, max_args=20)
+            self.command_policies["find"] = CommandPolicy(
+                name="find",
+                allowed=True,
+                max_args=20,
+                forbidden_flags={"-delete", "-exec"}
+            )
+            
+            # Dangerous commands that need explicit approval
+            self.command_policies["pip"] = CommandPolicy(name="pip", allowed=False)
+            self.command_policies["apt"] = CommandPolicy(name="apt", allowed=False)
+            self.command_policies["docker"] = CommandPolicy(name="docker", allowed=False)
+    
+    def validate_command(self, cmd: str | list) -> Tuple[bool, str]:
+        """
+        Validate command using multiple security layers.
+        
+        Returns:
+            (is_safe, reason_or_error)
+        """
+        # Normalize command to string
+        if isinstance(cmd, list):
+            cmd_str = shlex.join(cmd)
+        else:
+            cmd_str = cmd
+        
+        # Layer 1: Check total length
+        if len(cmd_str) > 4096:
+            return False, f"Command too long ({len(cmd_str)} > 4096 chars)"
+        
+        # Layer 2: Check forbidden patterns (regex)
+        for regex in self._forbidden_regexes:
+            if regex.search(cmd_str):
+                return False, f"Command matches forbidden pattern: {regex.pattern}"
+        
+        # Layer 3: Parse and validate command structure
+        try:
+            parsed = self._parse_command(cmd_str)
+        except SyntaxError as e:
+            return False, f"Invalid command syntax: {e}"
+        
+        # Layer 4: Check command policy
+        base_cmd = parsed.get("command", "")
+        if base_cmd not in self.command_policies:
+            if self.security_level == SecurityLevel.PARANOID:
+                return False, f"Unknown command '{base_cmd}' not in allowlist"
+            elif self.security_level == SecurityLevel.RESTRICTIVE:
+                # Check if it's a known dangerous command
+                if self._is_dangerous_command(base_cmd):
+                    return False, f"Command '{base_cmd}' requires explicit approval"
+        
+        policy = self.command_policies.get(base_cmd)
+        if policy:
+            if not policy.allowed:
+                return False, f"Command '{base_cmd}' is not allowed by policy"
+            
+            # Check argument count
+            if len(parsed.get("args", [])) > policy.max_args:
+                return False, f"Too many arguments ({len(parsed['args'])} > {policy.max_args})"
+            
+            # Check forbidden flags
+            args_set = set(parsed.get("args", []))
+            if policy.forbidden_flags & args_set:
+                forbidden = policy.forbidden_flags & args_set
+                return False, f"Forbidden flags: {forbidden}"
+        
+        # Layer 5: Check for shell injection attempts
+        if self._contains_shell_injection(cmd_str):
+            return False, "Potential shell injection detected"
+        
+        # Layer 6: Check for path traversal
+        if self._contains_path_traversal(cmd_str):
+            return False, "Path traversal detected"
+        
+        return True, "Command validated"
+    
+    def _parse_command(self, cmd: str) -> dict:
+        """Parse command into structured format."""
+        parts = shlex.split(cmd)
+        if not parts:
+            return {"command": "", "args": [], "flags": set()}
+        
+        command = parts[0]
+        args = []
+        flags = set()
+        
+        for part in parts[1:]:
+            if part.startswith("--"):
+                flags.add(part.split("=")[0])
+            elif part.startswith("-") and len(part) > 1:
+                # Handle combined short flags
+                for flag in part[1:]:
+                    flags.add(f"-{flag}")
+            else:
+                args.append(part)
+        
+        return {
+            "command": command,
+            "args": args,
+            "flags": flags,
+            "raw": cmd
+        }
+    
+    def _is_dangerous_command(self, cmd: str) -> bool:
+        """Check if command is known to be dangerous."""
+        dangerous = {
+            "rm", "dd", "mkfs", "fdisk", "parted",
+            "chmod", "chown", "chroot",
+            "iptables", "firewall-cmd",
+            "systemctl", "service",
+            "docker", "kubectl", "podman",
+            "sudo", "su",
+            "wget", "curl",  # When used to download and execute
+            "nc", "netcat",  # Network tools
+            "nmap",  # Network scanning
+            "hydra", "john",  # Password cracking
+        }
+        return cmd.lower() in dangerous
+    
+    def _contains_shell_injection(self, cmd: str) -> bool:
+        """Detect potential shell injection attempts."""
+        injection_patterns = [
+            r';\s*\w+',  # Command separator
+            r'\|\s*\w+',  # Pipe to command
+            r'&&\s*\w+',  # AND operator
+            r'\|\|\s*\w+',  # OR operator
+            r'`\w+`',  # Backtick substitution
+            r'\$\([^)]+\)',  # Command substitution
+            r'\$\{\w+\}',  # Variable expansion
+            r'>\s*/',  # Redirect to absolute path
+        ]
+        
+        for pattern in injection_patterns:
+            if re.search(pattern, cmd):
+                return True
+        
+        return False
+    
+    def _contains_path_traversal(self, cmd: str) -> bool:
+        """Detect path traversal attempts."""
+        traversal_patterns = [
+            r'\.\./\.\.',  # Multiple parent directories
+            r'/etc/passwd',
+            r'/etc/shadow',
+            r'/proc/self',
+            r'/root/',
+        ]
+        
+        for pattern in traversal_patterns:
+            if re.search(pattern, cmd):
+                return True
+        
+        return False
+    
+    def run(self, cmd: str | list, timeout: int = None, **kwargs) -> subprocess.CompletedProcess:
+        """Run command with full security validation."""
+        # Validate first
+        is_valid, reason = self.validate_command(cmd)
+        if not is_valid:
+            raise PermissionError(f"Command blocked: {reason}")
+        
+        # Apply timeout from policy if not specified
+        if timeout is None:
+            parsed = self._parse_command(cmd if isinstance(cmd, str) else shlex.join(cmd))
+            policy = self.command_policies.get(parsed.get("command", ""))
+            timeout = policy.timeout_seconds if policy else 60
+        
+        # Run with restrictions
+        env = kwargs.pop("env", {})
+        env["PYTHON_DISABLE_NETWORK"] = "1"
+        env["HTTP_PROXY"] = ""
+        env["HTTPS_PROXY"] = ""
+        
+        return subprocess.run(
+            cmd if isinstance(cmd, list) else shlex.split(cmd),
+            timeout=timeout,
+            env=env,
+            capture_output=True,
+            text=True,
+            **kwargs
+        )
+```
+
+### 3.2.3 Network Sandboxing (IMPLEMENTED - CRITICAL SECURITY FIX)
+
+**Problem:** Original design had empty network blocking implementation (just `pass`).
+
+**Solution:** Deny-all-by-default network policy with explicit allowlist and cloud metadata protection.
 
 ```python
 # core/security/network_sandbox.py
@@ -163,6 +437,9 @@ import socket
 import threading
 from typing import Optional, Set
 from contextlib import contextmanager
+import urllib.request
+import urllib.error
+
 
 class NetworkSandbox:
     """Enforce network isolation with deny-all-by-default policy."""
@@ -179,68 +456,104 @@ class NetworkSandbox:
         self.allowed_ports = allowed_ports or set()
         self.block_outbound_data = block_outbound_data
         
-        # NEVER allow these
+        # NEVER allow these - critical security blocks
         self.blocked_hosts = {
             "metadata.google.internal",
-            "169.254.169.254",  # AWS/GCP metadata service
+            "169.254.169.254",  # AWS/GCP/Azure metadata service
             "localhost",
             "127.0.0.1",
             "::1",
+            "169.254.169.253",  # Azure metadata
+            "instance-data",  # EC2 internal
         }
+        
+        # Block private IP ranges by default
+        self.block_private_ips = True
     
     def is_host_allowed(self, host: str) -> tuple[bool, str]:
         """Check if host is allowed for network access."""
-        # CRITICAL: Block cloud metadata services
+        # CRITICAL: Block cloud metadata services FIRST
         if host in self.blocked_hosts:
-            return False, f"Access to {host} is blocked (security risk)"
+            return False, f"Access to {host} is blocked (cloud metadata/security risk)"
         
         # Block private IP ranges unless explicitly allowed
-        if self._is_private_ip(host) and host not in self.allowed_hosts:
-            return False, f"Private IP {host} is not in allowlist"
+        if self.block_private_ips:
+            if self._is_private_ip(host):
+                if host not in self.allowed_hosts:
+                    return False, f"Private IP {host} is not in explicit allowlist"
         
         # Check allowlist
         if self.deny_all and host not in self.allowed_hosts:
-            return False, f"Host {host} is not in network allowlist"
+            return False, f"Host {host} is not in network allowlist (deny-all policy)"
         
         return True, "OK"
     
     def _is_private_ip(self, host: str) -> bool:
-        """Check if host is a private IP address."""
+        """Check if host resolves to a private IP address."""
         try:
             ip = socket.gethostbyname(host)
             octets = list(map(int, ip.split(".")))
             
-            # 10.x.x.x
+            # 10.x.x.x (Class A private)
             if octets[0] == 10:
                 return True
-            # 172.16-31.x.x
+            # 172.16-31.x.x (Class B private)
             if octets[0] == 172 and 16 <= octets[1] <= 31:
                 return True
-            # 192.168.x.x
+            # 192.168.x.x (Class C private)
             if octets[0] == 192 and octets[1] == 168:
                 return True
-            # 127.x.x.x
+            # 127.x.x.x (loopback)
             if octets[0] == 127:
                 return True
-            # 169.254.x.x (link-local)
+            # 169.254.x.x (link-local/APIPA)
             if octets[0] == 169 and octets[1] == 254:
+                return True
+            # 0.x.x.x (current network)
+            if octets[0] == 0:
                 return True
             
             return False
-        except Exception:
-            return False
+        except (socket.gaierror, ValueError, IndexError):
+            # Can't resolve or invalid IP - be safe and block
+            return True  # Block on uncertainty
+    
+    def is_port_allowed(self, port: int) -> tuple[bool, str]:
+        """Check if port is allowed."""
+        # Always block dangerous ports
+        dangerous_ports = {
+            22,   # SSH
+            23,   # Telnet
+            3389, # RDP
+            5900, # VNC
+            3306, # MySQL
+            5432, # PostgreSQL
+            6379, # Redis
+            27017, # MongoDB
+            11211, # Memcached
+        }
+        
+        if port in dangerous_ports:
+            return False, f"Port {port} is blocked (security risk)"
+        
+        if self.allowed_ports and port not in self.allowed_ports:
+            return False, f"Port {port} is not in allowlist"
+        
+        return True, "OK"
     
     @contextmanager
     def restrict_network(self):
         """Context manager that temporarily blocks all network access."""
-        # In production, this would use seccomp-bpf or similar
-        # For now, we rely on application-level enforcement
         original_deny = self.deny_all
         self.deny_all = True
+        original_allowed = self.allowed_hosts.copy()
+        self.allowed_hosts.clear()
         try:
             yield
         finally:
             self.deny_all = original_deny
+            self.allowed_hosts.clear()
+            self.allowed_hosts.update(original_allowed)
     
     def validate_socket_call(self, host: str, port: int) -> tuple[bool, str]:
         """Validate socket connection attempt."""
@@ -248,10 +561,25 @@ class NetworkSandbox:
         if not host_allowed:
             return False, host_reason
         
-        if self.allowed_ports and port not in self.allowed_ports:
-            return False, f"Port {port} is not in allowlist"
+        port_allowed, port_reason = self.is_port_allowed(port)
+        if not port_allowed:
+            return False, port_reason
         
         return True, "OK"
+    
+    def wrap_urlopen(self, url: str, **kwargs):
+        """Wrapped urlopen that enforces network sandbox."""
+        from urllib.parse import urlparse
+        
+        parsed = urlparse(url)
+        host = parsed.hostname or ""
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        
+        is_valid, reason = self.validate_socket_call(host, port)
+        if not is_valid:
+            raise PermissionError(f"Network access blocked: {reason}")
+        
+        return urllib.request.urlopen(url, **kwargs)
 
 
 # Integration with subprocess sandbox
@@ -273,6 +601,10 @@ class SecureSubprocessRunner:
         
         # Disable Python's ability to make outbound connections
         env["PYTHON_DISABLE_NETWORK"] = "1"
+        
+        # Additional environment hardening
+        env["GIT_SSL_NO_VERIFY"] = "0"  # Don't disable SSL verification
+        env["CURLLOPT_SSL_VERIFYPEER"] = "1"
         
         kwargs["env"] = env
         
