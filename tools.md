@@ -437,6 +437,666 @@ def skill_load(name: str) -> str:
     ...
 ```
 
+#### LSP Tools
+
+```python
+# core/tools/lsp.py
+
+@tool(
+    name="lsp_goto_definition",
+    description="Navigate to the definition of a symbol using LSP.",
+    cost_estimate=100,
+    risk_level="read-only"
+)
+def lsp_goto_definition(path: str, line: int, column: int) -> List[Dict]:
+    """
+    Find the definition location of a symbol at the given position.
+    
+    Args:
+        path: File path containing the symbol
+        line: Line number (1-indexed)
+        column: Column number (1-indexed)
+    
+    Returns:
+        List of location objects with path, line, column
+    """
+    ...
+
+@tool(
+    name="lsp_find_references",
+    description="Find all references to a symbol using LSP.",
+    cost_estimate=200,
+    risk_level="read-only"
+)
+def lsp_find_references(path: str, line: int, column: int) -> List[Dict]:
+    """
+    Find all references to the symbol at the given position.
+    
+    Args:
+        path: File path containing the symbol
+        line: Line number (1-indexed)
+        column: Column number (1-indexed)
+    
+    Returns:
+        List of location objects with path, line, column
+    """
+    ...
+
+@tool(
+    name="lsp_hover",
+    description="Get hover information (type, docs) for a symbol using LSP.",
+    cost_estimate=80,
+    risk_level="read-only"
+)
+def lsp_hover(path: str, line: int, column: int) -> str:
+    """
+    Get documentation and type information for a symbol.
+    
+    Args:
+        path: File path containing the symbol
+        line: Line number (1-indexed)
+        column: Column number (1-indexed)
+    
+    Returns:
+        Formatted hover text with type and documentation
+    """
+    ...
+
+@tool(
+    name="lsp_rename_symbol",
+    description="Rename a symbol across all references using LSP.",
+    cost_estimate=300,
+    risk_level="write"
+)
+def lsp_rename_symbol(path: str, line: int, column: int, new_name: str) -> bool:
+    """
+    Rename a symbol and all its references.
+    
+    Args:
+        path: File path containing the symbol
+        line: Line number (1-indexed)
+        column: Column number (1-indexed)
+        new_name: New name for the symbol
+    
+    Returns:
+        True on success
+    """
+    ...
+
+@tool(
+    name="lsp_get_diagnostics",
+    description="Get LSP diagnostics (errors, warnings) for a file.",
+    cost_estimate=150,
+    risk_level="read-only"
+)
+def lsp_get_diagnostics(path: str) -> List[Dict]:
+    """
+    Retrieve all diagnostics for a file.
+    
+    Args:
+        path: File path to check
+    
+    Returns:
+        List of diagnostic objects with severity, message, line, column
+    """
+    ...
+
+@tool(
+    name="lsp_code_actions",
+    description="Get available code actions/quick fixes at a position using LSP.",
+    cost_estimate=120,
+    risk_level="read-only"
+)
+def lsp_code_actions(path: str, line: int, column: int) -> List[Dict]:
+    """
+    Get available code actions at a position.
+    
+    Args:
+        path: File path
+        line: Line number (1-indexed)
+        column: Column number (1-indexed)
+    
+    Returns:
+        List of code action objects with title and edit
+    """
+    ...
+
+@tool(
+    name="lsp_format_document",
+    description="Format an entire document using LSP formatter.",
+    cost_estimate=200,
+    risk_level="write"
+)
+def lsp_format_document(path: str) -> str:
+    """
+    Get formatted version of entire document.
+    
+    Args:
+        path: File path to format
+    
+    Returns:
+        Formatted document content
+    """
+    ...
+
+@tool(
+    name="lsp_format_range",
+    description="Format a specific range in a document using LSP formatter.",
+    cost_estimate=100,
+    risk_level="write"
+)
+def lsp_format_range(path: str, start_line: int, end_line: int) -> str:
+    """
+    Get formatted version of a line range.
+    
+    Args:
+        path: File path
+        start_line: Starting line number (1-indexed)
+        end_line: Ending line number (inclusive)
+    
+    Returns:
+        Formatted range content
+    """
+    ...
+
+@tool(
+    name="lsp_completion",
+    description="Get code completion suggestions at a position using LSP.",
+    cost_estimate=150,
+    risk_level="read-only"
+)
+def lsp_completion(path: str, line: int, column: int) -> List[Dict]:
+    """
+    Get completion items at cursor position.
+    
+    Args:
+        path: File path
+        line: Line number (1-indexed)
+        column: Column number (1-indexed)
+    
+    Returns:
+        List of completion items with label, kind, detail, insertText
+    """
+    ...
+
+@tool(
+    name="lsp_signature_help",
+    description="Get function signature help at a position using LSP.",
+    cost_estimate=80,
+    risk_level="read-only"
+)
+def lsp_signature_help(path: str, line: int, column: int) -> Dict:
+    """
+    Get active parameter signature for function call.
+    
+    Args:
+        path: File path
+        line: Line number (1-indexed)
+        column: Column number (1-indexed)
+    
+    Returns:
+        Signature help object with signatures and active parameter
+    """
+    ...
+
+@tool(
+    name="lsp_document_symbols",
+    description="Get all symbols in a document using LSP.",
+    cost_estimate=120,
+    risk_level="read-only"
+)
+def lsp_document_symbols(path: str) -> List[Dict]:
+    """
+    Get outline of all symbols in a document.
+    
+    Args:
+        path: File path
+    
+    Returns:
+        List of symbol objects with name, kind, range, children
+    """
+    ...
+
+@tool(
+    name="lsp_workspace_symbols",
+    description="Search for symbols across the entire workspace using LSP.",
+    cost_estimate=200,
+    risk_level="read-only"
+)
+def lsp_workspace_symbols(query: str) -> List[Dict]:
+    """
+    Search workspace for symbols matching query.
+    
+    Args:
+        query: Search query (fuzzy match)
+    
+    Returns:
+        List of symbol objects with name, kind, location
+    """
+    ...
+
+@tool(
+    name="lsp_implementation",
+    description="Find implementations of an interface or abstract method using LSP.",
+    cost_estimate=150,
+    risk_level="read-only"
+)
+def lsp_implementation(path: str, line: int, column: int) -> List[Dict]:
+    """
+    Find all implementations of a type or method.
+    
+    Args:
+        path: File path containing the symbol
+        line: Line number (1-indexed)
+        column: Column number (1-indexed)
+    
+    Returns:
+        List of location objects with path, line, column
+    """
+    ...
+
+@tool(
+    name="lsp_type_definition",
+    description="Get type definition of a symbol using LSP.",
+    cost_estimate=100,
+    risk_level="read-only"
+)
+def lsp_type_definition(path: str, line: int, column: int) -> List[Dict]:
+    """
+    Find the type definition location of a symbol.
+    
+    Args:
+        path: File path containing the symbol
+        line: Line number (1-indexed)
+        column: Column number (1-indexed)
+    
+    Returns:
+        List of location objects with path, line, column
+    """
+    ...
+```
+
+#### Git & Version Control Tools
+
+```python
+# core/tools/git.py
+
+@tool(
+    name="git_status",
+    description="Get git status of the repository.",
+    cost_estimate=100,
+    risk_level="read-only"
+)
+def git_status() -> str:
+    """
+    Get current git status including staged/unstaged changes.
+    
+    Returns:
+        Formatted git status output
+    """
+    ...
+
+@tool(
+    name="git_diff",
+    description="Show git diff for specified files or entire repo.",
+    cost_estimate=200,
+    risk_level="read-only"
+)
+def git_diff(paths: Optional[List[str]] = None, cached: bool = False) -> str:
+    """
+    Show differences in working tree or staging area.
+    
+    Args:
+        paths: Optional list of file paths to diff
+        cached: If True, show staged changes only
+    
+    Returns:
+        Unified diff output
+    """
+    ...
+
+@tool(
+    name="git_log",
+    description="View git commit history.",
+    cost_estimate=150,
+    risk_level="read-only"
+)
+def git_log(limit: int = 10, path: Optional[str] = None) -> str:
+    """
+    View recent commits.
+    
+    Args:
+        limit: Number of commits to show
+        path: Optional file path to filter history
+    
+    Returns:
+        Formatted commit log
+    """
+    ...
+
+@tool(
+    name="git_blame",
+    description="Show git blame for a file with line-by-line authorship.",
+    cost_estimate=200,
+    risk_level="read-only"
+)
+def git_blame(path: str, start_line: Optional[int] = None, end_line: Optional[int] = None) -> str:
+    """
+    Show line-by-line commit information for a file.
+    
+    Args:
+        path: File path to blame
+        start_line: Optional starting line (1-indexed)
+        end_line: Optional ending line (inclusive)
+    
+    Returns:
+        Blame output with commit hashes and authors
+    """
+    ...
+
+@tool(
+    name="git_branch",
+    description="List, create, or switch git branches.",
+    cost_estimate=50,
+    risk_level="write"
+)
+def git_branch(action: str, name: Optional[str] = None) -> str:
+    """
+    Manage git branches.
+    
+    Args:
+        action: One of 'list', 'create', 'switch', 'delete'
+        name: Branch name (required for create/switch/delete)
+    
+    Returns:
+        Operation result
+    """
+    ...
+
+@tool(
+    name="git_commit",
+    description="Create a git commit with message.",
+    cost_estimate=100,
+    risk_level="write"
+)
+def git_commit(message: str, all_files: bool = False) -> str:
+    """
+    Create a new commit.
+    
+    Args:
+        message: Commit message
+        all_files: If True, stage all modified files before committing
+    
+    Returns:
+        Commit hash on success
+    """
+    ...
+
+@tool(
+    name="git_push",
+    description="Push commits to remote repository.",
+    cost_estimate=100,
+    risk_level="execute"
+)
+def git_push(remote: str = "origin", branch: Optional[str] = None) -> str:
+    """
+    Push local commits to remote.
+    
+    Args:
+        remote: Remote name (default: origin)
+        branch: Branch name (default: current branch)
+    
+    Returns:
+        Push output
+    """
+    ...
+
+@tool(
+    name="git_pull",
+    description="Pull changes from remote repository.",
+    cost_estimate=100,
+    risk_level="execute"
+)
+def git_pull(remote: str = "origin", branch: Optional[str] = None) -> str:
+    """
+    Fetch and merge from remote.
+    
+    Args:
+        remote: Remote name (default: origin)
+        branch: Branch name (default: current branch)
+    
+    Returns:
+        Pull output
+    """
+    ...
+
+@tool(
+    name="git_stash",
+    description="Stash or apply stashed changes.",
+    cost_estimate=50,
+    risk_level="write"
+)
+def git_stash(action: str, message: Optional[str] = None) -> str:
+    """
+    Manage stashed changes.
+    
+    Args:
+        action: One of 'save', 'apply', 'pop', 'list', 'drop'
+        message: Optional stash message for 'save' action
+    
+    Returns:
+        Operation result
+    """
+    ...
+```
+
+#### Debugging Tools
+
+```python
+# core/tools/debug.py
+
+@tool(
+    name="debug_start",
+    description="Start a debugging session for a program.",
+    cost_estimate=200,
+    risk_level="execute"
+)
+def debug_start(program: str, args: Optional[List[str]] = None, cwd: Optional[str] = None) -> str:
+    """
+    Launch debugger for a program.
+    
+    Args:
+        program: Program to debug
+        args: Optional command-line arguments
+        cwd: Working directory
+    
+    Returns:
+        Debugger session ID and initial state
+    """
+    ...
+
+@tool(
+    name="debug_breakpoint",
+    description="Set or remove breakpoints in a debugging session.",
+    cost_estimate=50,
+    risk_level="execute"
+)
+def debug_breakpoint(session_id: str, action: str, path: str, line: int) -> str:
+    """
+    Manage breakpoints.
+    
+    Args:
+        session_id: Active debug session ID
+        action: One of 'add', 'remove', 'list'
+        path: File path for breakpoint
+        line: Line number for breakpoint
+    
+    Returns:
+        Updated breakpoint list
+    """
+    ...
+
+@tool(
+    name="debug_step",
+    description="Execute step operations in debugger (step over/into/out).",
+    cost_estimate=100,
+    risk_level="execute"
+)
+def debug_step(session_id: str, action: str) -> str:
+    """
+    Step through code in debugger.
+    
+    Args:
+        session_id: Active debug session ID
+        action: One of 'over', 'into', 'out', 'continue'
+    
+    Returns:
+        Current execution state
+    """
+    ...
+
+@tool(
+    name="debug_evaluate",
+    description="Evaluate an expression in the current debug context.",
+    cost_estimate=100,
+    risk_level="execute"
+)
+def debug_evaluate(session_id: str, expression: str) -> str:
+    """
+    Evaluate expression in debug context.
+    
+    Args:
+        session_id: Active debug session ID
+        expression: Expression to evaluate
+    
+    Returns:
+        Evaluation result
+    """
+    ...
+
+@tool(
+    name="debug_stack_trace",
+    description="Get current stack trace from debug session.",
+    cost_estimate=80,
+    risk_level="execute"
+)
+def debug_stack_trace(session_id: str) -> str:
+    """
+    Get call stack from debugger.
+    
+    Args:
+        session_id: Active debug session ID
+    
+    Returns:
+        Formatted stack trace
+    """
+    ...
+
+@tool(
+    name="debug_variables",
+    description="List variables in current debug scope.",
+    cost_estimate=100,
+    risk_level="execute"
+)
+def debug_variables(session_id: str, scope: str = "local") -> str:
+    """
+    Get variables from debug context.
+    
+    Args:
+        session_id: Active debug session ID
+        scope: One of 'local', 'global', 'all'
+    
+    Returns:
+        Variable names and values
+    """
+    ...
+```
+
+#### HTTP & API Tools
+
+```python
+# core/tools/http.py
+
+@tool(
+    name="http_get",
+    description="Make an HTTP GET request to a URL.",
+    cost_estimate=300,
+    risk_level="execute"
+)
+def http_get(url: str, headers: Optional[Dict] = None, params: Optional[Dict] = None) -> Dict:
+    """
+    Perform HTTP GET request.
+    
+    Args:
+        url: Request URL
+        headers: Optional request headers
+        params: Optional query parameters
+    
+    Returns:
+        Response object with status, headers, body
+    """
+    ...
+
+@tool(
+    name="http_post",
+    description="Make an HTTP POST request with JSON body.",
+    cost_estimate=300,
+    risk_level="execute"
+)
+def http_post(url: str, json: Dict, headers: Optional[Dict] = None) -> Dict:
+    """
+    Perform HTTP POST request with JSON body.
+    
+    Args:
+        url: Request URL
+        json: JSON body
+        headers: Optional request headers
+    
+    Returns:
+        Response object with status, headers, body
+    """
+    ...
+
+@tool(
+    name="http_put",
+    description="Make an HTTP PUT request with JSON body.",
+    cost_estimate=300,
+    risk_level="execute"
+)
+def http_put(url: str, json: Dict, headers: Optional[Dict] = None) -> Dict:
+    """
+    Perform HTTP PUT request.
+    
+    Args:
+        url: Request URL
+        json: JSON body
+        headers: Optional request headers
+    
+    Returns:
+        Response object with status, headers, body
+    """
+    ...
+
+@tool(
+    name="http_delete",
+    description="Make an HTTP DELETE request.",
+    cost_estimate=200,
+    risk_level="execute"
+)
+def http_delete(url: str, headers: Optional[Dict] = None) -> Dict:
+    """
+    Perform HTTP DELETE request.
+    
+    Args:
+        url: Request URL
+        headers: Optional request headers
+    
+    Returns:
+        Response object with status, headers, body
+    """
+    ...
+```
+
 ### 3.3 User-Defined Tools
 
 Users can add custom tools in `user/plugins/tools/`:
