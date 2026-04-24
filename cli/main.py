@@ -54,17 +54,18 @@ def _create_orchestrator(args) -> Orchestrator | None:
     """Create and configure orchestrator."""
     config = _load_config()
 
+    # Use --provider flag if provided, otherwise default
+    provider_name = args.provider or config.get("default_provider", "default")
+
     # Support both list and dict formats
     providers = config.get("providers", [])
     if isinstance(providers, list):
-        provider_name = config.get("model", {}).get("default") or config.get("default_provider", "default")
         provider_config = next((p for p in providers if p.get("id") == provider_name), None)
     else:
-        provider_name = config.get("default_provider", "default")
         provider_config = providers.get(provider_name, {})
 
     if not provider_config:
-        logger.error("No provider configured")
+        logger.error(f"Provider '{provider_name}' not found")
         return None
 
     # Create adapter
