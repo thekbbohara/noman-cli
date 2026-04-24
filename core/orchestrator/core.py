@@ -193,22 +193,33 @@ class Orchestrator:
         """Parse and execute tool call from response. Returns None if no tool call."""
         import re
 
-        # Match patterns like: `run_shell "pwd"` or `run_shell 'pwd'`
-        match = re.search(r'run_shell\s+["\']([^"\']+)["\']', response)
+        # Match patterns like: run_shell "pwd", run_shell 'pwd', run_shell(pwd)
+        patterns = [
+            r'run_shell\s+["\']([^"\']+)["\']',
+            r'run_shell\s*\(\s*["\']([^"\']+)["\']\s*\)',
+            r'run_shell\(["\']([^"\']+)["\']\)',
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, response)
+            if match:
+                command = match.group(1)
+                print(f"Executing: run_shell {command!r}")
+                try:
+                    result = await self._tools.execute("run_shell", {"command": command})
+                    print(f"Result: {result!r}")
+                    return result
+                except Exception as e:
+                    print(f"Error: {e}")
+                    return f"Error: {e}"
+
+        # Fallback: try to extract any shell command
+        match = re.search(r'`(pwd|ls|ls -la|cat .+?)`', response)
         if match:
             command = match.group(1)
+            print(f"Fallback executing: {command!r}")
             try:
                 result = await self._tools.execute("run_shell", {"command": command})
-                return result
-            except Exception as e:
-                return f"Error: {e}"
-
-        # Match list_dir pattern
-        match = re.search(r'list_dir\s+["\']([^"\']+)["\']', response)
-        if match:
-            path = match.group(1)
-            try:
-                result = await self._tools.execute("list_dir", {"path": path})
                 return result
             except Exception as e:
                 return f"Error: {e}"
