@@ -46,8 +46,8 @@ class NoManTUI(App):
 
     _orchestrator = None
     _metrics = reactive(TUIMetrics)
-    _last_result_full: str = ""
-    _expanded: bool = False
+    _last_result_full = ""
+    _expanded = False
 
     def __init__(self, orchestrator=None, **kwargs):
         super().__init__(**kwargs)
@@ -61,17 +61,13 @@ class NoManTUI(App):
             with Horizontal(id="input-area"):
                 yield Input(placeholder="Enter task...", id="input", valid_empty=False)
 
-def on_mount(self) -> None:
+    def on_mount(self) -> None:
         self.update_status()
         self.query_one("#input", Input).focus()
-        output = self.query_one("#output", Log)
-        output.tooltip = "Click to select text for copy"
 
     def on_key(self, event: Key) -> None:
         if event.key == "enter":
             self.action_submit()
-        elif event.key == "f2":
-            self.action_switch_model()
 
     def action_submit(self) -> None:
         input_widget = self.query_one("#input", Input)
@@ -86,8 +82,7 @@ def on_mount(self) -> None:
         self.update_status()
         self.show_input()
 
-def action_expand(self) -> None:
-        """Toggle full result display."""
+    def action_expand(self) -> None:
         self._expanded = not self._expanded
         if self._last_result_full:
             output = self.query_one("#output", Log)
@@ -97,40 +92,33 @@ def action_expand(self) -> None:
                 output.write(f"{line}\n")
 
     def action_switch_model(self) -> None:
-        """Switch model provider."""
-        from pathlib import Path
-        import os
-
-        config_path = Path.home() / ".noman" / "provider.txt"
-        current = config_path.read_text().strip() if config_path.exists() else "default"
-
         providers = self._load_providers()
         if not providers:
             output = self.query_one("#output", Log)
-            output.write("No providers configured in user/config.toml")
+            output.write("No providers configured")
             return
 
-        # Cycle through providers
+        import os
+        config_path = os.path.expanduser("~/.noman/provider.txt")
+        current = open(config_path).read().strip() if os.path.exists(config_path) else "default"
+
         current_idx = providers.index(current) if current in providers else 0
         next_idx = (current_idx + 1) % len(providers)
         new_provider = providers[next_idx]
 
-        config_path.write_text(new_provider)
+        os.makedirs(os.path.dirname(config_path), exist_ok=True)
+        open(config_path, "w").write(new_provider)
 
         output = self.query_one("#output", Log)
-        output.write(f"Switched to: {new_provider} (restart to apply)")
-        self.update_status()
+        output.write(f"Provider: {new_provider} (restart to apply)")
 
     def _load_providers(self) -> list[str]:
-        """Load available providers from config."""
         from pathlib import Path
-        import tomllib
-
         config_path = Path.cwd() / "user" / "config.toml"
         if not config_path.exists():
             return []
-
         try:
+            import tomllib
             config = tomllib.loads(config_path.read_text())
             providers = config.get("providers", {})
             if isinstance(providers, list):
@@ -138,6 +126,72 @@ def action_expand(self) -> None:
             return list(providers.keys())
         except Exception:
             return []
+
+    def write_history(self, text: str) -> None:
+        from pathlib import Path
+        history_file = Path.home() / ".noman" / "history.txt"
+        history_file.parent.mkdir(exist_ok=True)
+        with open(history_file, "a") as f:
+            f.write(text + "\n")
+
+    def format_response(self, result: str, max_lines: int = 100) -> list[str]:
+        lines = result.strip().split("\n")
+        if len(lines) <= max_lines:
+            return lines
+        shown = lines[:max_lines]
+        shown.append(f"... ({len(lines) - max_lines} more lines)")
+        return shown
+
+    def render_markdown(self, text: str) -> list[str]:
+        import re
+        output = []
+        in_code = False
+
+        for line in text.strip().split("\n"):
+            if line.strip().startswith("```"):
+                in_code = not in_code
+                output.append(line)
+                continue
+            if in_code:
+                output.append(line)
+                continue
+
+            if line.startswith("### "):
+                output.append(f"\n━━━ {line[4:]} ━━━")
+            elif line.startswith("## "):
+                output.append(f"\n━━ {line[3:]} ━━")
+            elif line.startswith("# "):
+                output.append(f"\n◆ {line[2:]}")
+            elif "**" in line:
+                line = re.sub(r"\*\*(.+?)\*\*", r"[\1]", line)
+                output.append(line)
+            elif line.strip().startswith(("- ", "* ", "+ ")):
+                output.append(f"  ◇ {line.strip()[2:].strip()}")
+            elif line.strip():
+                output.append(line)
+
+        return output
+
+    async def run_task(self, task: str) -> None:
+        self._metrics.state = TUIState.INITIALIZING
+        self.update_status()
+        self.hide_input()
+
+        output = self.query_one("#output", Log)
+        output.write("")
+        output.write(f"❯ {task}")
+        output.write("─" * 40)
+
+        self._metrics.state = TUIState.RUNNING
+        self.update_status()
+
+        try:
+            if self._orchestrator:
+                result = await self._orchestrator.run(task)
+                self._last_result_full = result
+                output.write("")
+                for line in self.render_markdown(result):
+                    output.write(f"{line}\n")
                 self.write_history(f"❯ {task}\n{result}")
                 self._metrics.state = TUIState.COMPLETE
             else:
@@ -154,7 +208,6 @@ def action_expand(self) -> None:
     def update_status(self) -> None:
         status = self.query_one("#status", Static)
         m = self._metrics
-
         if m.state == TUIState.IDLE:
             status.update("NoMan v0.0.01")
         elif m.state == TUIState.INITIALIZING:
