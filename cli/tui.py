@@ -86,10 +86,10 @@ class NoManTUI(App):
         self._expanded = not self._expanded
         if self._last_result_full:
             output = self.query_one("#output", Log)
-            # Clear and re-render last result
             output.clear()
-            for line in self.format_response(self._last_result_full):
-                output.write(f"  {line}")
+            lines = self._last_result_full.strip().split("\n") if self._expanded else self._last_result_full.strip().split("\n")[:100]
+            for line in self.render_markdown("\n".join(lines)):
+                output.write(line)
 
     def write_history(self, text: str) -> None:
         from pathlib import Path
@@ -100,16 +100,58 @@ class NoManTUI(App):
             f.write(text + "\n")
 
     def format_response(self, result: str, max_lines: int = 100) -> list[str]:
-        """Format response for display."""
+        """Format response for display with styling."""
+        import re
+
         lines = result.strip().split("\n")
 
         if len(lines) <= max_lines:
             return lines
 
-        # Truncate with indicator
         shown = lines[:max_lines]
-        shown.append(f"... ({len(lines) - max_lines} more lines)")
+        shown.append(f"... ({len(lines) - max_lines} more lines, press Ctrl+E to expand)")
         return shown
+
+    def render_markdown(self, text: str) -> list[str]:
+        """Simple markdown-like rendering."""
+        import re
+
+        output = []
+        in_code = False
+
+        for line in text.strip().split("\n"):
+            # Code block markers
+            if line.strip().startswith("```"):
+                in_code = not in_code
+                output.append(line)
+                continue
+
+            if in_code:
+                output.append(f"  {line}")
+                continue
+
+            # Headers
+            if line.startswith("### "):
+                output.append(f"\n━━━ {line[4:]} ")
+            elif line.startswith("## "):
+                output.append(f"\n━━ {line[3:]}")
+            elif line.startswith("# "):
+                output.append(f"\n◆ {line[2:]}")
+
+            # Bold
+            elif "**" in line:
+                line = re.sub(r"\*\*(.+?)\*\*", r"▸\1◂", line)
+                output.append(f"  {line}")
+
+            # Lists
+            elif line.strip().startswith(("- ", "* ")):
+                output.append(f"  ◇ {line[2:]}")
+
+            # Default
+            else:
+                output.append(f"  {line}")
+
+        return output
 
     async def run_task(self, task: str) -> None:
         self._metrics.state = TUIState.INITIALIZING
@@ -128,8 +170,8 @@ class NoManTUI(App):
             if self._orchestrator:
                 result = await self._orchestrator.run(task)
                 self._last_result_full = result
-                for line in self.format_response(result):
-                    output.write(f"  {line}")
+                for line in self.render_markdown(result):
+                    output.write(line)
                 output.write("")
                 self.write_history(f"❯ {task}\n{result}")
                 self._metrics.state = TUIState.COMPLETE
