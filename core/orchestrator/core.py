@@ -153,34 +153,67 @@ class Orchestrator:
         """Run a task to completion. Returns final response."""
         self._current_session = Session(id=self._new_session_id())
 
-        # Single turn: get response and return
+        # Execute turn with potential tool calls
         turn = Turn(user_input=task)
-        response = await self._execute_turn(task)
+        response = await self._execute_turn_with_tools(task)
         turn.assistant_output = response
         self._current_session.turns.append(turn)
 
         return response
 
-    async def _execute_turn(self, task: str) -> str:
-        """Execute a single turn and return response."""
-        # Get context
-        context_view: ContextView | None = None
-        if self._context:
-            context_view = self._context.get_context(self._cfg.max_tokens_per_turn)
-
-        # Assemble messages
+    async def _execute_turn_with_tools(self, task: str) -> str:
+        """Execute a turn with tool call parsing and execution."""
         messages = self._assembler.assemble(
             self._current_session,
             task,
             self._cfg.max_tokens_per_turn,
         )
 
-        # Call model
-        self._state = OrchestratorState.PLANNING
-        response = await self._adapter.chat(messages)
+        for _ in range(self._cfg.max_tool_calls_per_turn):
+            self._state = OrchestratorState.PLANNING
+            response = await self._adapter.chat(messages)
+            content = response.content
 
-        # Return the response directly (no ReAct parsing for now)
-        return response.content
+            # Check for tool call pattern: `run_shell "command"`
+            tool_result = await self._maybe_execute_tool(content)
+            if tool_result is None:
+                # No tool call detected, return as final response
+                return content
+
+            # Tool was executed, add result and continue loop
+            self._state = OrchestratorState.EXECUTING
+            result_str = str(tool_result)
+            messages.append(Message(role="assistant", content=content))
+            messages.append(Message(role="user", content=f"Result: {result_str}"))
+
+        # Max iterations reached
+        return content
+
+    async def _maybe_execute_tool(self, response: str) -> str | None:
+        """Parse and execute tool call from response. Returns None if no tool call."""
+        import re
+
+        # Match patterns like: `run_shell "pwd"` or `run_shell 'pwd'`
+        match = re.search(r'run_shell\s+["\']([^"\']+)["\']', response)
+        if match:
+            command = match.group(1)
+            try:
+                result = await self._tools.execute("run_shell", {"command": command})
+                return result
+            except Exception as e:
+                return f"Error: {e}"
+
+        # Match list_dir pattern
+        match = re.search(r'list_dir\s+["\']([^"\']+)["\']', response)
+        if match:
+            path = match.group(1)
+            try:
+                result = await self._tools.execute("list_dir", {"path": path})
+                return result
+            except Exception as e:
+                return f"Error: {e}"
+
+        return None
 
     async def _react_loop(self, task: str, turn_num: int) -> list[ReActStep]:
         """Execute ReAct reasoning for one turn."""

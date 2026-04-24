@@ -75,8 +75,8 @@ def _create_orchestrator(args) -> Orchestrator | None:
         return None
 
     # Create tool bus
-    fs_sandbox = FilesystemSandbox(Path.cwd())
-    tool_bus = ToolBus(fs_sandbox=fs_sandbox)
+    from core.tools import create_toolbus
+    tool_bus = create_toolbus(Path.cwd())
 
     # Create context manager
     context = ContextManager(Path.cwd())
