@@ -144,8 +144,9 @@ class NoManTUI(App):
                 output.append(f"  {line}")
 
             # Lists
-            elif line.strip().startswith(("- ", "* ")):
-                output.append(f"  ◇ {line[2:]}")
+            elif line.strip().startswith(("- ", "* ", "+ ")):
+                line_clean = line.strip()[2:].strip()
+                output.append(f"  ◇ {line_clean}")
 
             # Default
             else:
