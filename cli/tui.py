@@ -9,6 +9,7 @@ from enum import Enum
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal
 from textual.events import Key
+from textual.keys import Keys
 from textual.reactive import reactive
 from textual.widgets import Input, Static, Log
 
@@ -34,12 +35,14 @@ class NoManTUI(App):
     #header { dock: top; height: 3; background: $panel; color: $text; }
     #status { width: 100%; content-align: center middle; }
     #output { height: 100%; border: solid $border; }
+    #output:focus { border: double $accent; }
     #input-area { dock: bottom; height: 3; background: $panel; }
     #input { width: 100%; }
     """
 
     BINDINGS = [
         ("ctrl+c", "cancel", "Cancel"),
+        ("ctrl+a", "select_all", "Select All"),
     ]
 
     _orchestrator = None
@@ -77,6 +80,11 @@ class NoManTUI(App):
         self._metrics.state = TUIState.IDLE
         self.update_status()
         self.show_input()
+
+    def action_select_all(self) -> None:
+        """Select all text in output for copying."""
+        output = self.query_one("#output", Log)
+        output.anchor()
 
     async def run_task(self, task: str) -> None:
         self._metrics.state = TUIState.INITIALIZING
