@@ -195,6 +195,9 @@ class NoManTUI(App):
             if self._orchestrator:
                 result = await self._orchestrator.run(task)
                 self._last_result_full = result
+                output.write("")
+                output.write(f"DEBUG: {len(result)} chars, {result.count(chr(10))} newlines")
+                output.write("")
                 for line in self.render_markdown(result):
                     output.write(line)
                 self.write_history(f"❯ {task}\n{result}")
