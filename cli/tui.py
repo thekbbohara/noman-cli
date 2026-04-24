@@ -38,10 +38,15 @@ class NoManTUI(App):
     #input { width: 100%; }
     """
 
-    BINDINGS = [("ctrl+c", "cancel", "Cancel")]
+    BINDINGS = [
+        ("ctrl+c", "cancel", "Cancel"),
+        ("ctrl+e", "expand", "Expand"),
+    ]
 
     _orchestrator = None
     _metrics = reactive(TUIMetrics)
+    _last_result_full: str = ""
+    _expanded: bool = False
 
     def __init__(self, orchestrator=None, **kwargs):
         super().__init__(**kwargs)
@@ -76,6 +81,16 @@ class NoManTUI(App):
         self.update_status()
         self.show_input()
 
+    def action_expand(self) -> None:
+        """Toggle full result display."""
+        self._expanded = not self._expanded
+        if self._last_result_full:
+            output = self.query_one("#output", Log)
+            # Clear and re-render last result
+            output.clear()
+            for line in self.format_response(self._last_result_full):
+                output.write(f"  {line}")
+
     def write_history(self, text: str) -> None:
         from pathlib import Path
 
@@ -83,6 +98,18 @@ class NoManTUI(App):
         history_file.parent.mkdir(exist_ok=True)
         with open(history_file, "a") as f:
             f.write(text + "\n")
+
+    def format_response(self, result: str, max_lines: int = 100) -> list[str]:
+        """Format response for display."""
+        lines = result.strip().split("\n")
+
+        if len(lines) <= max_lines:
+            return lines
+
+        # Truncate with indicator
+        shown = lines[:max_lines]
+        shown.append(f"... ({len(lines) - max_lines} more lines)")
+        return shown
 
     async def run_task(self, task: str) -> None:
         self._metrics.state = TUIState.INITIALIZING
@@ -100,8 +127,8 @@ class NoManTUI(App):
         try:
             if self._orchestrator:
                 result = await self._orchestrator.run(task)
-                output.write("")
-                for line in result.strip().split("\n"):
+                self._last_result_full = result
+                for line in self.format_response(result):
                     output.write(f"  {line}")
                 output.write("")
                 self.write_history(f"❯ {task}\n{result}")
