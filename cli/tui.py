@@ -79,6 +79,14 @@ class NoManTUI(App):
     def on_mount(self) -> None:
         self.update_status()
 
+    def on_key(self, event: Key) -> None:
+        if event.key == "ctrl+c":
+            self._metrics.state = TUIState.IDLE
+            self.update_status()
+            self.show_input()
+            return
+        super().on_key(event)
+
     def on_input_submit(self, event: Input.Submit) -> None:
         task = event.value.strip()
         if not task:
