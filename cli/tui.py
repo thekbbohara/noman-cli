@@ -70,49 +70,52 @@ class NoManTUI(App):
         if event.key == "enter":
             self.action_submit()
 
-    def _convert_markdown_to_textual(self, text: str) -> list[str]:
-        result = []
+    def _convert_markdown_to_textual(self, text: str) -> list:
+        """Convert markdown to Rich Text objects."""
+        from rich.text import Text
+        import re
+
+        lines = []
         in_code = False
 
         for line in text.split("\n"):
             if line.strip().startswith("```"):
                 if in_code:
-                    result.append("─" * 40)
+                    lines.append(Text("─" * 40, style="dim"))
                 else:
-                    result.append("─" * 40)
+                    lines.append(Text("─" * 40, style="dim"))
                 in_code = not in_code
                 continue
 
             if in_code:
-                result.append(line)
+                lines.append(Text(line, style="cyan"))
                 continue
 
             if line.startswith("# "):
-                result.append(f"[b]{line[2:].strip()}[/b]")
+                lines.append(Text(line[2:].strip(), style="bold"))
                 continue
             elif line.startswith("## "):
-                result.append(f"[b]{line[3:].strip()}[/b]")
+                lines.append(Text(line[3:].strip(), style="bold"))
                 continue
             elif line.startswith("### "):
-                result.append(f"[b]{line[4:].strip()}[/b]")
+                lines.append(Text(line[4:].strip(), style="bold"))
                 continue
 
             stripped = line.strip()
             if stripped.startswith(("- ", "* ", "+ ")):
                 item = stripped[2:].strip()
                 item = re.sub(r"\*\*(.+?)\*\*", r"[b]\1[/b]", item)
-                if item.startswith("*") and item.count("*") >= 2:
-                    item = re.sub(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", r"[i]\1[/i]", item)
-                result.append(f"  - {item}")
+                item = re.sub(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", r"[i]\1[/i]", item)
+                lines.append(Text.from_markup(f"  • {item}"))
                 continue
             elif "**" in line:
                 line = re.sub(r"\*\*(.+?)\*\*", r"[b]\1[/b]", line)
-                result.append(line)
+                lines.append(Text.from_markup(line))
                 continue
             else:
-                result.append(line)
+                lines.append(Text(line))
 
-        return result
+        return lines
 
     def action_submit(self) -> None:
         input_widget = self.query_one("#input", Input)
