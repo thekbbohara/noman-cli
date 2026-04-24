@@ -109,8 +109,8 @@ class NoManTUI(App):
         self._metrics.state = TUIState.RUNNING
         self.update_status()
 
-        try:
-if self._orchestrator:
+try:
+            if self._orchestrator:
                 result = await self._orchestrator.run(task)
                 output.write(result)
                 self.write_history(f"$ {task}\n{result}")
