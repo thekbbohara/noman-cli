@@ -58,7 +58,7 @@ class NoManTUI(App):
         with Container():
             with Horizontal(id="header"):
                 yield Static("NoMan v0.0.01", id="status")
-            yield RichLog(id="output")
+            yield RichLog(id="output", markup=True)
             with Horizontal(id="input-area"):
                 yield Input(placeholder="Enter task...", id="input", valid_empty=False)
 
@@ -207,7 +207,10 @@ class NoManTUI(App):
 
                 lines = self._convert_markdown_to_textual(result)
                 for line in lines[:5]:
-                    output.write(line)
+                    if isinstance(line, str):
+                        output.write(line)
+                    else:
+                        output.write(line)  # Rich Text object
                 if len(lines) > 5:
                     output.write("[i]... (Ctrl+E to expand)[/i]")
 
