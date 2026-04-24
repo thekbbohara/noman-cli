@@ -30,10 +30,10 @@ class TUIMetrics:
 
 class NoManTUI(App):
     CSS = """
-    Screen { background: $surface; }
+    Screen { background: transparent; }
     #header { dock: top; height: 3; background: $panel; color: $text; }
     #status { width: 100%; content-align: center middle; }
-    #output { height: 100%; border: solid $border; }
+    #output { height: 100%; border: solid $border; background: $surface; }
     #input-area { dock: bottom; height: 3; background: $panel; }
     #input { width: 100%; }
     """
@@ -41,6 +41,7 @@ class NoManTUI(App):
     BINDINGS = [
         ("ctrl+c", "cancel", "Cancel"),
         ("ctrl+e", "expand", "Expand"),
+        ("f2", "switch_model", "Model"),
     ]
 
     _orchestrator = None
@@ -60,13 +61,17 @@ class NoManTUI(App):
             with Horizontal(id="input-area"):
                 yield Input(placeholder="Enter task...", id="input", valid_empty=False)
 
-    def on_mount(self) -> None:
+def on_mount(self) -> None:
         self.update_status()
         self.query_one("#input", Input).focus()
+        output = self.query_one("#output", Log)
+        output.tooltip = "Click to select text for copy"
 
     def on_key(self, event: Key) -> None:
         if event.key == "enter":
             self.action_submit()
+        elif event.key == "f2":
+            self.action_switch_model()
 
     def action_submit(self) -> None:
         input_widget = self.query_one("#input", Input)
@@ -81,7 +86,7 @@ class NoManTUI(App):
         self.update_status()
         self.show_input()
 
-    def action_expand(self) -> None:
+def action_expand(self) -> None:
         """Toggle full result display."""
         self._expanded = not self._expanded
         if self._last_result_full:
@@ -89,103 +94,50 @@ class NoManTUI(App):
             output.clear()
             lines = self._last_result_full.strip().split("\n") if self._expanded else self._last_result_full.strip().split("\n")[:100]
             for line in self.render_markdown("\n".join(lines)):
-                output.write(line)
+                output.write(f"{line}\n")
 
-    def write_history(self, text: str) -> None:
+    def action_switch_model(self) -> None:
+        """Switch model provider."""
         from pathlib import Path
+        import os
 
-        history_file = Path.home() / ".noman" / "history.txt"
-        history_file.parent.mkdir(exist_ok=True)
-        with open(history_file, "a") as f:
-            f.write(text + "\n")
+        config_path = Path.home() / ".noman" / "provider.txt"
+        current = config_path.read_text().strip() if config_path.exists() else "default"
 
-    def format_response(self, result: str, max_lines: int = 100) -> list[str]:
-        """Format response for display with styling."""
-        import re
+        providers = self._load_providers()
+        if not providers:
+            output = self.query_one("#output", Log)
+            output.write("No providers configured in user/config.toml")
+            return
 
-        lines = result.strip().split("\n")
+        # Cycle through providers
+        current_idx = providers.index(current) if current in providers else 0
+        next_idx = (current_idx + 1) % len(providers)
+        new_provider = providers[next_idx]
 
-        if len(lines) <= max_lines:
-            return lines
-
-        shown = lines[:max_lines]
-        shown.append(f"... ({len(lines) - max_lines} more lines, press Ctrl+E to expand)")
-        return shown
-
-    def render_markdown(self, text: str, max_lines: int = 100) -> list[str]:
-        """Simple markdown-like rendering with truncation."""
-        import re
-
-        lines = text.strip().split("\n")
-
-        # Truncate if needed
-        if len(lines) > max_lines:
-            lines = lines[:max_lines]
-            truncated = True
-        else:
-            truncated = False
-
-        output = []
-        in_code = False
-
-        for line in lines:
-            # Code block markers
-            if line.strip().startswith("```"):
-                in_code = not in_code
-                output.append(line)
-                continue
-
-            if in_code:
-                output.append(line)
-                continue
-
-            # Headers
-            if line.startswith("### "):
-                output.append(f"\n━━━ {line[4:]} ━━━")
-            elif line.startswith("## "):
-                output.append(f"\n━━ {line[3:]} ━━")
-            elif line.startswith("# "):
-                output.append(f"\n◆ {line[2:]}")
-
-            # Bold
-            elif "**" in line:
-                line = re.sub(r"\*\*(.+?)\*\*", r"[\1]", line)
-                output.append(line)
-
-            # Lists
-            elif line.strip().startswith(("- ", "* ", "+ ")):
-                line_clean = line.strip()[2:].strip()
-                output.append(f"  ◇ {line_clean}")
-
-            # Non-empty lines
-            elif line.strip():
-                output.append(line)
-
-        if truncated:
-            output.append(f"\n  ... (press Ctrl+E to expand)")
-
-        return output
-
-    async def run_task(self, task: str) -> None:
-        self._metrics.state = TUIState.INITIALIZING
-        self.update_status()
-        self.hide_input()
+        config_path.write_text(new_provider)
 
         output = self.query_one("#output", Log)
-        output.write("")
-        output.write(f"❯ {task}")
-        output.write("─" * 40)
-
-        self._metrics.state = TUIState.RUNNING
+        output.write(f"Switched to: {new_provider} (restart to apply)")
         self.update_status()
 
+    def _load_providers(self) -> list[str]:
+        """Load available providers from config."""
+        from pathlib import Path
+        import tomllib
+
+        config_path = Path.cwd() / "user" / "config.toml"
+        if not config_path.exists():
+            return []
+
         try:
-            if self._orchestrator:
-                result = await self._orchestrator.run(task)
-                self._last_result_full = result
-                output.write("")
-                for line in self.render_markdown(result):
-                    output.write(f"{line}\n")
+            config = tomllib.loads(config_path.read_text())
+            providers = config.get("providers", {})
+            if isinstance(providers, list):
+                return [p.get("id", "default") for p in providers]
+            return list(providers.keys())
+        except Exception:
+            return []
                 self.write_history(f"❯ {task}\n{result}")
                 self._metrics.state = TUIState.COMPLETE
             else:
