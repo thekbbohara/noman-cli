@@ -36,13 +36,13 @@ class NoManTUI(App):
     #status { width: 100%; content-align: center middle; }
     #output { height: 100%; border: solid $border; }
     #output:focus { border: double $accent; }
+    #output > .--log { overflow: hidden; }
     #input-area { dock: bottom; height: 3; background: $panel; }
     #input { width: 100%; }
     """
 
     BINDINGS = [
         ("ctrl+c", "cancel", "Cancel"),
-        ("ctrl+a", "select_all", "Select All"),
     ]
 
     _orchestrator = None
@@ -63,6 +63,8 @@ class NoManTUI(App):
     def on_mount(self) -> None:
         self.update_status()
         self.query_one("#input", Input).focus()
+        output = self.query_one("#output", Log)
+        output.tooltip = "Click to select text for copy"
 
     def on_key(self, event: Key) -> None:
         if event.key == "enter":
@@ -80,6 +82,15 @@ class NoManTUI(App):
         self._metrics.state = TUIState.IDLE
         self.update_status()
         self.show_input()
+
+    def write_history(self, text: str) -> None:
+        """Write conversation to file for copying."""
+        import os
+        from pathlib import Path
+        history_file = Path.home() / ".noman" / "history.txt"
+        history_file.parent.mkdir(exist_ok=True)
+        with open(history_file, "a") as f:
+            f.write(text + "\n")
 
     def action_select_all(self) -> None:
         """Select all text in output for copying."""
@@ -99,10 +110,10 @@ class NoManTUI(App):
         self.update_status()
 
         try:
-            if self._orchestrator:
+if self._orchestrator:
                 result = await self._orchestrator.run(task)
                 output.write(result)
-                output.write("")
+                self.write_history(f"$ {task}\n{result}")
                 self._metrics.state = TUIState.COMPLETE
             else:
                 output.write("Error: No orchestrator configured")
