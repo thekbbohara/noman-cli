@@ -39,7 +39,7 @@ class NoManTUI(App):
     """
 
     BINDINGS = [
-        ("ctrl+c", "cancel", "Cancel", show=False),
+        ("ctrl+c", "cancel", "Cancel"),
     ]
 
     _orchestrator = None
