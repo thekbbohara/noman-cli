@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from textual.app import App, ComposeResult
-from textual.containers import Container, Horizontal, Vertical
+from textual.containers import Container, Horizontal
 from textual.events import Key
 from textual.reactive import reactive
 from textual.widgets import Input, Static, Log
@@ -34,8 +34,6 @@ class NoManTUI(App):
     #header { dock: top; height: 3; background: $panel; color: $text; }
     #status { width: 100%; content-align: center middle; }
     #output { height: 100%; border: solid $border; background: $surface; }
-    #response-container { height: auto; max-height: 5; }
-    #response-preview { color: $text-muted; }
     #input-area { dock: bottom; height: 3; background: $panel; }
     #input { width: 100%; }
     """
@@ -147,14 +145,13 @@ class NoManTUI(App):
         for line in lines:
             if line.strip().startswith("```"):
                 if in_code:
-                    lang = code_lines[0] if code_lines else ""
                     result.append("┌" + "─" * 40)
-                    for cl in code_lines[1:]:
+                    for cl in code_lines:
                         result.append(f"│ {cl}")
                     result.append("└" + "─" * 40)
                     code_lines = []
                 else:
-                    code_lines = [line.strip()[3:]]
+                    code_lines = []
                 in_code = not in_code
                 continue
 
@@ -170,11 +167,13 @@ class NoManTUI(App):
                 result.append(f"━━ {line[3:]}")
             elif line.startswith("# "):
                 result.append(f"◆ {line[2:]}")
+            elif line.strip().startswith(("- ", "* ", "+ ")):
+                line_clean = line.strip()[2:].strip()
+                line_clean = re.sub(r"\*\*(.+?)\*\*", r"[\1]", line_clean)
+                result.append(f"◇ {line_clean}")
             elif "**" in line:
                 line = re.sub(r"\*\*(.+?)\*\*", r"[\1]", line)
                 result.append(line)
-            elif line.strip().startswith(("- ", "* ", "+ ")):
-                result.append(f"  ◇ {line.strip()[2:].strip()}")
             elif line.strip():
                 result.append(line)
 
@@ -188,7 +187,7 @@ class NoManTUI(App):
         output = self.query_one("#output", Log)
         output.write("")
         output.write(f"❯ {task}")
-        output.write("��" * 40)
+        output.write("─" * 40)
 
         self._metrics.state = TUIState.RUNNING
         self.update_status()
@@ -201,7 +200,6 @@ class NoManTUI(App):
                 self._result_lines = lines
                 self._expanded = False
 
-                # Show preview (first 3 lines)
                 for line in lines[:3]:
                     output.write(line)
 
