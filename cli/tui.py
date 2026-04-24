@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from dataclasses import dataclass
 from enum import Enum
 
-from rich.console import Console
-from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal
 from textual.events import Key
@@ -50,7 +49,6 @@ class NoManTUI(App):
     _metrics = reactive(TUIMetrics)
     _last_result_full = ""
     _expanded = False
-    _console = Console()
 
     def __init__(self, orchestrator=None, **kwargs):
         super().__init__(**kwargs)
@@ -72,6 +70,50 @@ class NoManTUI(App):
         if event.key == "enter":
             self.action_submit()
 
+    def _convert_markdown_to_textual(self, text: str) -> list[str]:
+        result = []
+        in_code = False
+
+        for line in text.split("\n"):
+            if line.strip().startswith("```"):
+                if in_code:
+                    result.append("─" * 40)
+                else:
+                    result.append("─" * 40)
+                in_code = not in_code
+                continue
+
+            if in_code:
+                result.append(line)
+                continue
+
+            if line.startswith("# "):
+                result.append(f"[b]{line[2:].strip()}[/b]")
+                continue
+            elif line.startswith("## "):
+                result.append(f"[b]{line[3:].strip()}[/b]")
+                continue
+            elif line.startswith("### "):
+                result.append(f"[b]{line[4:].strip()}[/b]")
+                continue
+
+            stripped = line.strip()
+            if stripped.startswith(("- ", "* ", "+ ")):
+                item = stripped[2:].strip()
+                item = re.sub(r"\*\*(.+?)\*\*", r"[b]\1[/b]", item)
+                if item.startswith("*") and item.count("*") >= 2:
+                    item = re.sub(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", r"[i]\1[/i]", item)
+                result.append(f"  - {item}")
+                continue
+            elif "**" in line:
+                line = re.sub(r"\*\*(.+?)\*\*", r"[b]\1[/b]", line)
+                result.append(line)
+                continue
+            else:
+                result.append(line)
+
+        return result
+
     def action_submit(self) -> None:
         input_widget = self.query_one("#input", Input)
         task = input_widget.value.strip()
@@ -89,14 +131,16 @@ class NoManTUI(App):
         self._expanded = not self._expanded
         output = self.query_one("#output", RichLog)
         output.clear()
+
         if self._expanded:
-            output.write(self._last_result_full)
-        else:
-            lines = self._last_result_full.strip().split("\n")
-            for line in lines[:3]:
+            for line in self._last_result_full.split("\n"):
                 output.write(line)
-            if len(lines) > 3:
-                output.write("... (press Ctrl+E to see all)")
+        else:
+            lines = self._convert_markdown_to_textual(self._last_result_full)
+            for line in lines[:5]:
+                output.write(line)
+            if len(lines) > 5:
+                output.write("[i]... (Ctrl+E for full)[/i]")
 
     def action_switch_model(self) -> None:
         providers = self._load_providers()
@@ -116,7 +160,7 @@ class NoManTUI(App):
 
         output = self.query_one("#output", RichLog)
         output.clear()
-        output.write(f"Provider: {new_provider} (restart to apply)")
+        output.write(f"[green]Provider: {new_provider}[/green] (restart)")
 
     def _load_providers(self) -> list[str]:
         from pathlib import Path
@@ -147,7 +191,7 @@ class NoManTUI(App):
 
         output = self.query_one("#output", RichLog)
         output.clear()
-        output.write(f"[bold]❯[/bold] {task}")
+        output.write(f"[b]❯[/b] {task}")
 
         self._metrics.state = TUIState.RUNNING
         self.update_status()
@@ -157,11 +201,17 @@ class NoManTUI(App):
                 result = await self._orchestrator.run(task)
                 self._last_result_full = result
                 self._expanded = False
-                output.write(result)
+
+                lines = self._convert_markdown_to_textual(result)
+                for line in lines[:5]:
+                    output.write(line)
+                if len(lines) > 5:
+                    output.write("[i]... (Ctrl+E to expand)[/i]")
+
                 self.write_history(f"❯ {task}\n{result}")
                 self._metrics.state = TUIState.COMPLETE
             else:
-                output.write("[red]Error: No orchestrator configured[/red]")
+                output.write("[red]Error: No orchestrator[/red]")
                 self._metrics.state = TUIState.ERROR
         except Exception as e:
             output.write(f"[red]Error: {e}[/red]")
@@ -179,11 +229,11 @@ class NoManTUI(App):
         elif m.state == TUIState.INITIALIZING:
             status.update("Initializing...")
         elif m.state == TUIState.RUNNING:
-            status.update(f"Turn {m.turn_count + 1} | {m.tokens_used} tokens | running")
+            status.update(f"Turn {m.turn_count + 1} | running")
         elif m.state == TUIState.COMPLETE:
-            status.update(f"Turn {m.turn_count} | {m.tokens_used} tokens | complete")
+            status.update(f"Turn {m.turn_count} | complete")
         elif m.state == TUIState.ERROR:
-            status.update(f"Turn {m.turn_count} | {m.tokens_used} tokens | error")
+            status.update(f"Turn {m.turn_count} | error")
 
     def hide_input(self) -> None:
         self.query_one("#input-area", Horizontal).display = False
