@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from dataclasses import dataclass, field
+from collections.abc import Callable, Coroutine
+from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Any, Callable, Coroutine, TypeVar
+from typing import Any, TypeVar
 
 from . import CircuitBreakerOpenError, NoManError
 
@@ -71,7 +72,7 @@ class CircuitBreaker:
 
         try:
             result = await fn(*args, **kwargs)
-        except Exception as exc:
+        except Exception:
             async with self._lock:
                 self._failures += 1
                 if self._failures >= self.config.failure_threshold:

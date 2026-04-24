@@ -2,8 +2,8 @@
 
 import pytest
 
-from core.errors import ConfigError, ProviderConfigError
 from cli.config_validator import ConfigValidator
+from core.errors import ConfigError, ProviderConfigError
 
 
 def test_valid_config():

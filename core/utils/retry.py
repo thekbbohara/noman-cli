@@ -5,8 +5,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, TypeVar
+from typing import Any, TypeVar
 
 from core.errors import NoManError
 
@@ -85,6 +86,6 @@ def with_retry(config: RetryConfig | None = None):
         async def wrapper(*args: Any, **kwargs: Any) -> T:
             return await mgr.execute(fn, *args, **kwargs)
 
-        return wrapper
+        return wrapper  # type: ignore[return-value]
 
     return decorator

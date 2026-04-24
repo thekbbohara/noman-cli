@@ -868,79 +868,7 @@ Phase 0 → Phase 1 → Phase 2 → Phase 3 → Phase 4 → Phase 5 → Phase 11
 
 ---
 
-## 13. Risk Analysis & Mitigation
-
-### 12.1 Technical Risks
-
-| Risk | Likelihood | Impact | Mitigation |
-|------|------------|--------|------------|
-| Tree-sitter parsing too slow for large repos | Medium | High | Incremental parsing, background workers, caching |
-| PageRank computation expensive on every file change | Medium | Medium | Incremental graph updates, debounced recomputation |
-| SQLite + sqlite-vec performance degrades with large memory | Low | High | Regular vacuum, partition old episodic memory, index optimization |
-| Local models produce poor tool-calling output | High | High | Fallback to stronger models, better prompt engineering, few-shot examples |
-| Self-improvement makes things worse | Medium | High | Conservative auto-promote thresholds, easy rollback, human approval for major changes |
-| Sandboxing breaks legitimate tool functionality | Medium | Medium | Extensive allowlist testing, escape hatch for trusted users |
-
-### 12.2 Product Risks
-
-| Risk | Likelihood | Impact | Mitigation |
-|------|------------|--------|------------|
-| Users don't trust agent with write access | High | High | Default to read-only mode, clear audit trail, easy undo |
-| Learning curve too steep for new users | Medium | Medium | Interactive tutorial, sensible defaults, `noman explain` mode |
-| Performance perceived as slow vs. competitors | Medium | High | Aggressive caching, streaming responses, progress indicators |
-| Feature creep dilutes focus | Medium | Medium | Strict adherence to non-goals, community-driven prioritization |
-
-### 12.3 Ecosystem Risks
-
-| Risk | Likelihood | Impact | Mitigation |
-|------|------------|--------|------------|
-| Major LLM provider changes API breaking compatibility | Low | High | Abstraction layer, multi-provider support, rapid adapter updates |
-| Local model ecosystem fragments | Medium | Medium | Stick to OpenAI-compat standard, community-maintained adapters |
-| Security vulnerability in dependency chain | Medium | High | Regular audits, pinned dependencies, minimal attack surface |
-
----
-
-## 14. Open Questions (Expanded)
-
-The following are unresolved and should be decided before Phase 2:
-
-1. **Embedding model lock-in.** If a user swaps embedding models mid-life, all stored vectors become meaningless. Options: store embedding model version per row and re-embed on mismatch, or forbid swaps post-init. Leaning toward the former with lazy re-embedding on access.
-
-2. **Critic bias.** The critic is itself an LLM — can it reliably score traces produced by an equally-capable LLM? May need human-labeled ground truth for bootstrapping, or a deterministic component (tests passing / linter clean) weighted into the score.
-
-3. **Overlay portability.** Should `overlay/` be shareable across users ("download community skills")? Great for flywheel, risky for prompt injection. Probably yes with GPG/SSH signing and explicit user opt-in.
-
-4. **Windows support.** Tree-sitter and sqlite-vec both have Windows wheels now, but `fork()`-style subprocess sandboxing doesn't. WSL-only for v0.1, native Windows post-v1 using Job Objects + AppContainer.
-
-5. **Team sync architecture.** Should team collaboration use a central server or P2P sync? Central is easier for conflict resolution; P2P is more aligned with local-first ethos. Leaning toward hybrid: optional central relay with end-to-end encryption.
-
-6. **Monetization path.** If this project becomes popular, what's the sustainable business model? Options: enterprise features (team sync, audit logs), hosted sync service, premium skill marketplace, consulting. Should not compromise core principles.
-
----
-
-## 15. Appendix: Glossary
-
-| Term | Definition |
-|------|------------|
-| **Context Frugality** | Design principle of minimizing token usage through selective loading |
-| **Overlay Architecture** | Three-region repo layout (`core/`, `overlay/`, `user/`) enabling conflict-free self-modification |
-| **Skeleton Map** | Compressed representation of repo structure (signatures only, no bodies) |
-| **PageRank Symbols** | Symbol importance ranking based on call/import graph centrality |
-| **JIT Loading** | Just-in-time fetching of code content only when needed |
-| **Tiered Memory** | Memory split into episodic (traces), semantic (facts), procedural (skills) |
-| **Fact Extraction** | Process of distilling session traces into atomic, durable facts |
-| **Trace Critic** | Agent that scores execution traces on success, efficiency, correctness |
-| **Meta-Agent** | Agent that analyzes critic scores and proposes prompt/tool improvements |
-| **Skill** | Reusable task trajectory distilled from successful past executions |
-| **Heuristic** | Localized rule-of-thumb triggered by specific contexts |
-| **Tool Bus** | Discovery, registration, and execution layer for agent tools |
-| **Model Adapter** | Abstraction layer normalizing different LLM provider APIs |
-| **Role Routing** | Using different models for planner, executor, critic roles |
-| **Capability Negotiation** | Startup probing of provider capabilities and quirks |
-
----
-
-## 16. Summary
+## 13. Summary
 
 NoMan is four ideas in a trench coat:
 
@@ -951,12 +879,10 @@ NoMan is four ideas in a trench coat:
 
 The whole design is defensive about three failure modes that kill most agent projects: **context blowup**, **state corruption on update**, and **vendor lock-in**. Getting those three right buys everything else.
 
-**What's new in v0.2:**
-- Added Executive Summary and Success Metrics (§Executive Summary, §1.3)
-- Clarified Non-Goals to maintain focus (§1.2)
-- Expanded System Overview with component responsibilities and data flow (§2.2–2.4)
-- Added comprehensive Gap Analysis covering security, observability, IDE integrations, collaboration, testing, performance, and error handling (§4)
-- Enhanced Implementation Roadmap with dependencies, critical path, and milestones (§12)
-- Added Risk Analysis covering technical, product, and ecosystem risks (§13)
-- Expanded Open Questions with team sync and monetization considerations (§14)
-- Added Glossary for terminology clarity (§15)
+---
+
+## Appendix
+
+- [Glossary](appendix/glossary.md) — Terminology and definitions
+- [Risk Analysis](appendix/risk_analysis.md) — Technical, product, and ecosystem risks
+- [Open Questions](appendix/open_questions.md) — Unresolved design decisions

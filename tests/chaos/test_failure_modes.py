@@ -1,11 +1,10 @@
 """Chaos tests: verify graceful degradation under extreme conditions."""
 
-import asyncio
 
 import pytest
 
 from core.errors.circuit_breaker import CircuitBreaker, ErrorBoundary
-from core.utils.rate_limiter import QuotaConfig, QuotaManager, RateLimiter
+from core.utils.rate_limiter import QuotaConfig, RateLimiter
 from core.utils.retry import RetryConfig, RetryManager
 
 

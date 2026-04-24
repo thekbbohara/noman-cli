@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
 
 from core.errors import ToolNotFoundError, ToolSignatureError, ToolValidationError
 from core.security.fs_sandbox import FilesystemSandbox
@@ -20,7 +21,7 @@ logger = logging.getLogger(__name__)
 class Tool:
     name: str
     description: str
-    parameters: Dict[str, Any]
+    parameters: dict[str, Any]
     handler: Callable[..., Any]
     cost_estimate: int = 0
     signature: str = ""  # hex-encoded ed25519 signature
@@ -36,7 +37,7 @@ class ToolBus:
         signer: ToolSigner | None = None,
         quotas: QuotaManager | None = None,
     ) -> None:
-        self._tools: Dict[str, Tool] = {}
+        self._tools: dict[str, Tool] = {}
         self.fs = fs_sandbox
         self.net = network_sandbox
         self.signer = signer
@@ -52,10 +53,10 @@ class ToolBus:
         self._tools[tool.name] = tool
         logger.info("Registered tool: %s", tool.name)
 
-    def list_tools(self) -> List[str]:
+    def list_tools(self) -> list[str]:
         return list(self._tools.keys())
 
-    async def execute(self, name: str, args: Dict[str, Any]) -> Any:
+    async def execute(self, name: str, args: dict[str, Any]) -> Any:
         """Execute a tool by name with sandboxed args."""
         tool = self._tools.get(name)
         if tool is None:
@@ -72,7 +73,7 @@ class ToolBus:
             return await tool.handler(**args)
         return tool.handler(**args)
 
-    def _validate_args(self, tool: Tool, args: Dict[str, Any]) -> None:
+    def _validate_args(self, tool: Tool, args: dict[str, Any]) -> None:
         required = set(tool.parameters.get("required", []))
         missing = required - set(args.keys())
         if missing:

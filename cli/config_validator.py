@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Dict, List, Set
+from typing import Any
 
 from core.errors import ConfigError, ProviderConfigError
 
@@ -17,17 +16,17 @@ VALID_ROLES = {"planner", "executor", "critic", "embedder"}
 
 @dataclass(frozen=True)
 class ValidatedConfig:
-    providers: Dict[str, Dict[str, Any]]
+    providers: dict[str, dict[str, Any]]
     default_provider: str
-    role_routing: Dict[str, str]
-    security: Dict[str, Any]
-    budget: Dict[str, int]
+    role_routing: dict[str, str]
+    security: dict[str, Any]
+    budget: dict[str, int]
 
 
 class ConfigValidator:
     """Validate and normalize user config.toml."""
 
-    def validate(self, raw: Dict[str, Any]) -> ValidatedConfig:
+    def validate(self, raw: dict[str, Any]) -> ValidatedConfig:
         providers = raw.get("providers", {})
         if not providers:
             raise ConfigError("No providers configured")

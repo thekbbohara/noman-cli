@@ -1,0 +1,37 @@
+[model]
+default = "lammacpp"
+
+[model.token_budget]
+max_tokens = 8000
+
+[[providers]]
+id = "lammacpp"
+type = "openai"
+api_key = "not-needed"
+model = "Qwen3.6-35B-A3B-Q4_K_M.gguf"
+base_url = "https://lammacpp.peridot.com.np/v1"
+
+[[providers]]
+id = "my-anthropic"
+type = "anthropic"
+api_key = "${ANTHROPIC_API_KEY}"
+model = "claude-sonnet-4-20250514"
+
+[[providers]]
+id = "my-ollama"
+type = "ollama"
+model = "llama3"
+base_url = "http://localhost:11434/v1"
+
+[[providers]]
+id = "my-groq"
+type = "groq"
+api_key = "${GROQ_API_KEY}"
+model = "llama-3.1-70b-versatile"
+base_url = "https://api.groq.com/openai/v1"
+
+[[providers]]
+id = "gpt4o"
+type = "openai"
+api_key = "${OPENAI_API_KEY}"
+model = "gpt-4o"

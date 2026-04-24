@@ -1,6 +1,7 @@
 """Adversarial tests for prompt injection resistance."""
 
 import pytest
+
 from core.selfimprove.safety_guardrails import SafetyGuardrails
 
 

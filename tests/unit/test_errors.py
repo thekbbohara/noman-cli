@@ -1,6 +1,5 @@
 """Unit tests for the error hierarchy."""
 
-import pytest
 from core.errors import (
     BudgetExceededError,
     CircuitBreakerOpenError,

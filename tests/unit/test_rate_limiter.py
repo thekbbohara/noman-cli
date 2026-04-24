@@ -1,6 +1,5 @@
 """Tests for rate limiting."""
 
-import asyncio
 
 import pytest
 

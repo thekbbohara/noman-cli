@@ -6,7 +6,6 @@ import ipaddress
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import List, Set
 from urllib.parse import urlparse
 
 from core.errors import NetworkViolation
@@ -14,7 +13,7 @@ from core.errors import NetworkViolation
 logger = logging.getLogger(__name__)
 
 # IP ranges that should NEVER be contacted.
-_PRIVATE_CIDRS: List[ipaddress.IPv4Network | ipaddress.IPv6Network] = [
+_PRIVATE_CIDRS: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = [
     ipaddress.ip_network("10.0.0.0/8"),
     ipaddress.ip_network("172.16.0.0/12"),
     ipaddress.ip_network("192.168.0.0/16"),
@@ -26,7 +25,7 @@ _PRIVATE_CIDRS: List[ipaddress.IPv4Network | ipaddress.IPv6Network] = [
 ]
 
 # Metadata-service endpoints commonly used for cloud credential exfil.
-_METADATA_HOSTS: Set[str] = {
+_METADATA_HOSTS: set[str] = {
     "169.254.169.254",
     "metadata.google.internal",
     "metadata.aws.internal",
@@ -37,7 +36,7 @@ _METADATA_HOSTS: Set[str] = {
 class NetworkPolicy:
     """Immutable network policy."""
 
-    allowlist: Set[str] = field(default_factory=set)
+    allowlist: set[str] = field(default_factory=set)
     deny_private: bool = True
     deny_metadata: bool = True
 

@@ -1,8 +1,7 @@
 """Tests for retry logic."""
 
-import asyncio
 import pytest
-from core.errors import NoManError
+
 from core.utils.retry import RetryConfig, RetryManager, with_retry
 
 

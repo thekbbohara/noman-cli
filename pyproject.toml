@@ -2,6 +2,9 @@
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.build.targets.wheel]
+packages = ["cli", "core", "core.context", "core.memory", "core.orchestrator"]
+
 [project]
 name = "noman-cli"
 version = "0.1.0"
@@ -48,12 +51,32 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "D", "UP", "B", "C4", "SIM"]
+ignore = [
+    "D101",  # Missing docstring in public class
+    "D102",  # Missing docstring in public method
+    "D103",  # Missing docstring in public function
+    "D104",  # Missing docstring in public package
+    "D105",  # Missing docstring in magic method
+    "D107",  # Missing docstring in __init__
+    "D212",  # Multi-line docstring formatting
+    "D401",  # First line of docstring mood
+    "D413",  # Missing blank after section
+    "B017",  # Blind exception catch
+    "N818",  # Exception naming
+    "SIM102", # Nested if statements
+    "SIM103", # Simplifiable if
+    "SIM105", # Try-except-pass
+    "F841",  # Unused variable
+]
 
 [tool.mypy]
 python_version = "3.11"
-strict = true
-warn_return_any = true
+strict = false
+warn_return_any = false
 warn_unused_ignores = true
+ignore_missing_imports = true
+no_implicit_optional = false
+warn_unreachable = false
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

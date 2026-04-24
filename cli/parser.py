@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import sys
-from typing import List, Optional
 
 _COMMANDS = {
     "doctor", "review", "rollback", "memory", "skill", "stats", "emergency",
@@ -70,7 +69,7 @@ def build_subparsers() -> argparse.ArgumentParser:
     return parser
 
 
-def parse_args(argv: Optional[List[str]] = None):
+def parse_args(argv: list[str] | None = None):
     argv = list(argv) if argv is not None else sys.argv[1:]
 
     # Parse global flags first

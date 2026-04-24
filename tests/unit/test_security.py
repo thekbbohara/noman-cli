@@ -1,6 +1,5 @@
 """Security tests: sandbox, signing, guardrails."""
 
-import asyncio
 import tempfile
 from pathlib import Path
 

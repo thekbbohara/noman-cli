@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import hashlib
 import logging
 from pathlib import Path
-from typing import Dict
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization
@@ -26,7 +24,9 @@ class ToolSigner:
         self._pub: Ed25519PublicKey | None = None
         if public_key_path:
             pem = Path(public_key_path).read_bytes()
-            self._pub = serialization.load_pem_public_key(pem)
+            loaded = serialization.load_pem_public_key(pem)
+            if isinstance(loaded, Ed25519PublicKey):
+                self._pub = loaded
 
     def generate_keypair(self, output_dir: str | Path) -> tuple[Path, Path]:
         """Generate a new Ed25519 keypair and write to disk."""
@@ -58,6 +58,8 @@ class ToolSigner:
         """Return a base64-encoded signature of *tool_source*."""
         priv_pem = Path(private_key_path).read_bytes()
         priv = serialization.load_pem_private_key(priv_pem, password=None)
+        if not isinstance(priv, Ed25519PrivateKey):
+            raise ToolSignatureError("Only Ed25519 keys supported for signing")
         sig = priv.sign(tool_source.encode())
         return sig.hex()
 

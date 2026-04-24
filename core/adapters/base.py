@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Callable, Dict, List
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +15,7 @@ logger = logging.getLogger(__name__)
 class Message:
     role: str  # system | user | assistant | tool
     content: str
-    tool_calls: List[Dict[str, Any]] = field(default_factory=list)
+    tool_calls: list[dict[str, Any]] = field(default_factory=list)
     tool_call_id: str | None = None
 
 
@@ -22,14 +23,14 @@ class Message:
 class ToolDefinition:
     name: str
     description: str
-    parameters: Dict[str, Any]  # JSON Schema
+    parameters: dict[str, Any]  # JSON Schema
 
 
 @dataclass
 class ChatResponse:
     content: str
-    tool_calls: List[Dict[str, Any]] = field(default_factory=list)
-    usage: Dict[str, int] = field(default_factory=dict)
+    tool_calls: list[dict[str, Any]] = field(default_factory=list)
+    usage: dict[str, int] = field(default_factory=dict)
     model: str = ""
 
 
@@ -46,15 +47,15 @@ class ModelCapabilities:
 class BaseAdapter(ABC):
     """Abstract contract every LLM backend must satisfy."""
 
-    def __init__(self, config: Dict[str, Any]) -> None:
+    def __init__(self, config: dict[str, Any]) -> None:
         self.config = config
         self._capabilities: ModelCapabilities | None = None
 
     @abstractmethod
     async def chat(
         self,
-        messages: List[Message],
-        tools: List[ToolDefinition] | None = None,
+        messages: list[Message],
+        tools: list[ToolDefinition] | None = None,
         stream: bool = False,
     ) -> ChatResponse | AsyncIterator[str]:
         ...
@@ -68,6 +69,11 @@ class BaseAdapter(ABC):
         if self._capabilities is None:
             self._capabilities = await self.probe_capabilities()
         return self._capabilities
+
+    @abstractmethod
+    async def close(self) -> None:
+        """Clean up adapter resources. Override in subclasses."""
+        pass
 
     @property
     def role(self) -> str:

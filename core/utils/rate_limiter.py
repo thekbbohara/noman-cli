@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import asyncio
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from typing import Dict
 
 from core.errors import RateLimitError
 
@@ -31,7 +30,7 @@ class RateLimiter:
     def __init__(self, config: QuotaConfig | None = None) -> None:
         self.config = config or QuotaConfig()
         self._request_timestamps: list[datetime] = []
-        self._token_counts: Dict[date, int] = defaultdict(int)
+        self._token_counts: dict[date, int] = defaultdict(int)
         self._concurrent = 0
         self._lock = asyncio.Lock()
 
@@ -85,8 +84,8 @@ class QuotaManager:
     def __init__(self, config: QuotaConfig | None = None) -> None:
         self.config = config or QuotaConfig()
         self.rate_limiter = RateLimiter(config)
-        self._tool_calls: Dict[str, int] = defaultdict(int)
-        self._turn_counts: Dict[str, int] = defaultdict(int)
+        self._tool_calls: dict[str, int] = defaultdict(int)
+        self._turn_counts: dict[str, int] = defaultdict(int)
 
     async def check_tool_call(self, tool_name: str) -> None:
         """Raise if the tool call would exceed limits."""
@@ -109,10 +108,10 @@ class QuotaManager:
             raise RateLimitError("Rate limit exceeded")
         self._turn_counts[session_id] += 1
 
-    def usage_report(self) -> Dict[str, int]:
+    def usage_report(self) -> dict[str, int]:
         """Return current usage counters."""
         return {
             "tool_calls_total": sum(self._tool_calls.values()),
             "turns_total": sum(self._turn_counts.values()),
-            **self.rate_limiter._token_counts,
+            **{str(k): v for k, v in self.rate_limiter._token_counts.items()},
         }

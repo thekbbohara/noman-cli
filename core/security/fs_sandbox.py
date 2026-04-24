@@ -4,14 +4,13 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Set
 
 from core.errors import PathTraversalError, SandboxViolation
 
 logger = logging.getLogger(__name__)
 
 # Paths that are NEVER allowed for read or write, even inside the sandbox.
-_BLACKLIST: Set[Path] = {
+_BLACKLIST: set[Path] = {
     Path("/etc/passwd"),
     Path("/etc/shadow"),
     Path("/etc/hosts"),
@@ -35,6 +34,7 @@ class FilesystemSandbox:
             PathTraversalError: if resolved path escapes *root*.
             SandboxViolation: if write is requested but disallowed, or if
                 the path is on the global blacklist.
+
         """
         target = Path(path).expanduser()
         resolved = (self.root / target).resolve() if not target.is_absolute() else target.resolve()

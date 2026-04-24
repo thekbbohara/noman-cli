@@ -1,6 +1,5 @@
 """Tests for the hardened Tool Bus."""
 
-import asyncio
 import tempfile
 
 import pytest

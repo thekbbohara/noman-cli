@@ -6,18 +6,17 @@ import logging
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import FrozenSet, List
 
 from core.errors import SandboxViolation
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_PROTECTED: FrozenSet[str] = frozenset({"main", "master", "production"})
+_DEFAULT_PROTECTED: frozenset[str] = frozenset({"main", "master", "production"})
 
 
 @dataclass(frozen=True)
 class GitSafetyConfig:
-    protected_branches: FrozenSet[str] = field(default_factory=lambda: _DEFAULT_PROTECTED)
+    protected_branches: frozenset[str] = field(default_factory=lambda: _DEFAULT_PROTECTED)
     require_force_explicit: bool = True
     allow_delete_branch: bool = False
 
@@ -29,7 +28,7 @@ class SafeGitOperations:
         self.repo = Path(repo_path)
         self.config = config or GitSafetyConfig()
 
-    def _run(self, cmd: List[str], check: bool = True) -> subprocess.CompletedProcess:
+    def _run(self, cmd: list[str], check: bool = True) -> subprocess.CompletedProcess:
         logger.debug("git %s", " ".join(cmd))
         return subprocess.run(
             ["git", "-C", str(self.repo), *cmd],

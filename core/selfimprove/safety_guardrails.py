@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import FrozenSet
 
 from core.errors import SelfModificationError
 
@@ -12,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 # These paths/modules are NEVER allowed as targets of self-improvement.
-_IMMUTABLE_PATHS: FrozenSet[str] = frozenset(
+_IMMUTABLE_PATHS: frozenset[str] = frozenset(
     {
         "core/errors",
         "core/security",
@@ -22,7 +21,7 @@ _IMMUTABLE_PATHS: FrozenSet[str] = frozenset(
 )
 
 # These tool names cannot be generated or modified by the agent.
-_IMMUTABLE_TOOLS: FrozenSet[str] = frozenset(
+_IMMUTABLE_TOOLS: frozenset[str] = frozenset(
     {"rollback", "emergency_stop", "emergency_disable_self_improve"}
 )
 
@@ -31,10 +30,10 @@ _IMMUTABLE_TOOLS: FrozenSet[str] = frozenset(
 class SafetyGuardrails:
     """Immutable constraints on self-modification."""
 
-    immutable_paths: FrozenSet[str] = field(default_factory=lambda: _IMMUTABLE_PATHS)
-    immutable_tools: FrozenSet[str] = field(default_factory=lambda: _IMMUTABLE_TOOLS)
+    immutable_paths: frozenset[str] = field(default_factory=lambda: _IMMUTABLE_PATHS)
+    immutable_tools: frozenset[str] = field(default_factory=lambda: _IMMUTABLE_TOOLS)
     max_prompt_diff_percent: int = 20  # >20% diff requires human approval
-    require_human_approval_for: FrozenSet[str] = frozenset(
+    require_human_approval_for: frozenset[str] = frozenset(
         {"new_tool", "prompt_replace", "heuristic_delete"}
     )
 
