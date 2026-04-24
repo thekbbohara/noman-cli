@@ -9,6 +9,7 @@ from enum import Enum
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal
 from textual.binding import Binding
+from textual.events import Key
 from textual.reactive import reactive
 from textual.widgets import Input, Static, Log
 
@@ -34,6 +35,7 @@ class NoManTUI(App):
 
     BINDINGS = [
         Binding("enter", "submit", "Submit", show=False),
+        Binding("ctrl+c", "cancel", "Cancel", show=False),
     ]
 
     CSS = """
@@ -77,14 +79,22 @@ class NoManTUI(App):
                 yield Static("NoMan v0.0.01", id="status")
             yield Log(id="output")
             with Horizontal(id="input-area"):
-                yield Input(placeholder="Enter task...", id="input")
+                yield Input(placeholder="Enter task...", id="input", valid_empty=False)
 
     def on_mount(self) -> None:
         self.update_status()
         self.query_one("#input", Input).focus()
 
+    def on_key(self, event: Key) -> None:
+        print(f"KEY: {event.key!r}")
+        if event.key == "enter":
+            self.action_submit()
+        elif event.key == "ctrl+c":
+            self.action_cancel()
+
     def action_submit(self) -> None:
         """Handle Enter key to submit task."""
+        print("ACTION_SUBMIT called")
         input_widget = self.query_one("#input", Input)
         task = input_widget.value.strip()
         if not task:
@@ -92,8 +102,15 @@ class NoManTUI(App):
         input_widget.value = ""
         asyncio.create_task(self.run_task(task))
 
+    def action_cancel(self) -> None:
+        """Handle Ctrl+C to cancel."""
+        self._metrics.state = TUIState.IDLE
+        self.update_status()
+        self.show_input()
+
     async def run_task(self, task: str) -> None:
         """Execute a task through the orchestrator."""
+        print(f"RUN_TASK: {task}")
         self._metrics.state = TUIState.INITIALIZING
         self.update_status()
         self.hide_input()
