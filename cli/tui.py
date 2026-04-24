@@ -84,8 +84,6 @@ class NoManTUI(App):
             self._metrics.state = TUIState.IDLE
             self.update_status()
             self.show_input()
-            return
-        super().on_key(event)
 
     def on_input_submit(self, event: Input.Submit) -> None:
         task = event.value.strip()
