@@ -54,8 +54,8 @@ def _create_orchestrator(args) -> Orchestrator | None:
     """Create and configure orchestrator."""
     config = _load_config()
 
-    # Use --provider flag if provided, otherwise default
-    provider_name = args.provider or config.get("default_provider", "default")
+    # Use --provider flag if provided, otherwise from model.default or default_provider
+    provider_name = args.provider or config.get("model", {}).get("default") or config.get("default_provider", "default")
 
     # Support both list and dict formats
     providers = config.get("providers", [])
