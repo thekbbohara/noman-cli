@@ -157,11 +157,17 @@ class NoManTUI(App):
                 continue
 
             if line.startswith("### "):
-                output.append(f"\n━━━ {line[4:]} ━━━")
+                output.append("")
+                output.append(f"━━━ {line[4:]} ━━━")
+                output.append("")
             elif line.startswith("## "):
-                output.append(f"\n━━ {line[3:]} ━━")
+                output.append("")
+                output.append(f"━━ {line[3:]} ━━")
+                output.append("")
             elif line.startswith("# "):
-                output.append(f"\n◆ {line[2:]}")
+                output.append("")
+                output.append(f"◆ {line[2:]}")
+                output.append("")
             elif "**" in line:
                 line = re.sub(r"\*\*(.+?)\*\*", r"[\1]", line)
                 output.append(line)
@@ -189,9 +195,8 @@ class NoManTUI(App):
             if self._orchestrator:
                 result = await self._orchestrator.run(task)
                 self._last_result_full = result
-                output.write("")
                 for line in self.render_markdown(result):
-                    output.write(f"{line}\n")
+                    output.write(line)
                 self.write_history(f"❯ {task}\n{result}")
                 self._metrics.state = TUIState.COMPLETE
             else:
