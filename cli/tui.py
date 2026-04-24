@@ -10,8 +10,10 @@ from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal, Vertical
 from textual.driver import Driver
 from textual.events import Key
+from textual.keys import Keys
 from textual.reactive import reactive
 from textual.widgets import Header, Input, Static, Log
+from textual.binding import Binding
 
 
 class TUIState(Enum):
@@ -32,6 +34,11 @@ class TUIMetrics:
 
 class NoManTUI(App):
     """NoMan interactive TUI."""
+
+    BINDINGS = [
+        Binding("enter", "submit_input", "Submit"),
+        Binding("ctrl+c", "cancel", "Cancel"),
+    ]
 
     CSS = """
     Screen {
@@ -79,11 +86,20 @@ class NoManTUI(App):
     def on_mount(self) -> None:
         self.update_status()
 
-    def on_key(self, event: Key) -> None:
-        if event.key == "ctrl+c":
-            self._metrics.state = TUIState.IDLE
-            self.update_status()
-            self.show_input()
+    def action_submit_input(self) -> None:
+        """Handle Enter key to submit task."""
+        input_widget = self.query_one("#input", Input)
+        task = input_widget.value.strip()
+        if not task:
+            return
+        input_widget.value = ""
+        asyncio.create_task(self.run_task(task))
+
+    def action_cancel(self) -> None:
+        """Handle Ctrl+C to cancel."""
+        self._metrics.state = TUIState.IDLE
+        self.update_status()
+        self.show_input()
 
     def on_input_submit(self, event: Input.Submit) -> None:
         task = event.value.strip()
