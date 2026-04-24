@@ -112,14 +112,23 @@ class NoManTUI(App):
         shown.append(f"... ({len(lines) - max_lines} more lines, press Ctrl+E to expand)")
         return shown
 
-    def render_markdown(self, text: str) -> list[str]:
-        """Simple markdown-like rendering."""
+    def render_markdown(self, text: str, max_lines: int = 100) -> list[str]:
+        """Simple markdown-like rendering with truncation."""
         import re
+
+        lines = text.strip().split("\n")
+
+        # Truncate if needed
+        if len(lines) > max_lines:
+            lines = lines[:max_lines]
+            truncated = True
+        else:
+            truncated = False
 
         output = []
         in_code = False
 
-        for line in text.strip().split("\n"):
+        for line in lines:
             # Code block markers
             if line.strip().startswith("```"):
                 in_code = not in_code
@@ -127,30 +136,33 @@ class NoManTUI(App):
                 continue
 
             if in_code:
-                output.append(f"  {line}")
+                output.append(line)
                 continue
 
             # Headers
             if line.startswith("### "):
-                output.append(f"\n━━━ {line[4:]} ")
+                output.append(f"\n━━━ {line[4:]} ━━━")
             elif line.startswith("## "):
-                output.append(f"\n━━ {line[3:]}")
+                output.append(f"\n━━ {line[3:]} ━━")
             elif line.startswith("# "):
                 output.append(f"\n◆ {line[2:]}")
 
             # Bold
             elif "**" in line:
-                line = re.sub(r"\*\*(.+?)\*\*", r"▸\1◂", line)
-                output.append(f"  {line}")
+                line = re.sub(r"\*\*(.+?)\*\*", r"[\1]", line)
+                output.append(line)
 
             # Lists
             elif line.strip().startswith(("- ", "* ", "+ ")):
                 line_clean = line.strip()[2:].strip()
                 output.append(f"  ◇ {line_clean}")
 
-            # Default
-            else:
-                output.append(f"  {line}")
+            # Non-empty lines
+            elif line.strip():
+                output.append(line)
+
+        if truncated:
+            output.append(f"\n  ... (press Ctrl+E to expand)")
 
         return output
 
@@ -162,7 +174,7 @@ class NoManTUI(App):
         output = self.query_one("#output", Log)
         output.write("")
         output.write(f"❯ {task}")
-        output.write("")
+        output.write("─" * 40)
 
         self._metrics.state = TUIState.RUNNING
         self.update_status()
@@ -171,9 +183,9 @@ class NoManTUI(App):
             if self._orchestrator:
                 result = await self._orchestrator.run(task)
                 self._last_result_full = result
-                for line in self.render_markdown(result):
-                    output.write(line)
                 output.write("")
+                for line in self.render_markdown(result):
+                    output.write(f"{line}\n")
                 self.write_history(f"❯ {task}\n{result}")
                 self._metrics.state = TUIState.COMPLETE
             else:
