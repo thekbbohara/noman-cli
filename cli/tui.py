@@ -34,7 +34,7 @@ class NoManTUI(App):
     Screen { background: transparent; }
     #header { dock: top; height: 3; background: $panel; color: $text; }
     #status { width: 100%; content-align: center middle; }
-    #output { height: 100%; border: solid $border; background: $surface; }
+    #output { height: 100%; border: solid $border; background: $surface; overflow-y: auto; }
     #input-area { dock: bottom; height: 3; background: $panel; }
     #input { width: 100%; }
     """
@@ -58,7 +58,7 @@ class NoManTUI(App):
         with Container():
             with Horizontal(id="header"):
                 yield Static("NoMan v0.0.01", id="status")
-            yield RichLog(id="output", markup=True)
+            yield RichLog(id="output", markup=True, wrap=True)
             with Horizontal(id="input-area"):
                 yield Input(placeholder="Enter task...", id="input", valid_empty=False)
 
