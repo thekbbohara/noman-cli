@@ -170,9 +170,13 @@ def main(argv=None):
 
         return 0
     else:
-        print("NoMan interactive REPL")
-        print("(REPL mode not yet fully implemented - use task mode for now)")
-        print("Example: noman 'refactor the auth module'")
+        # Run TUI REPL
+        from cli.tui import run_tui
+        orch = _create_orchestrator(args)
+        if orch is None:
+            logger.error("Failed to create orchestrator")
+            return 1
+        run_tui(orch)
         return 0
 
 
