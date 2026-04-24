@@ -90,7 +90,8 @@ class NoManTUI(App):
         self.hide_input()
 
         output = self.query_one("#output", Log)
-        output.write(f"$ {task}")
+        output.write("")
+        output.write(f"❯ {task}")
         output.write("")
 
         self._metrics.state = TUIState.RUNNING
@@ -99,8 +100,11 @@ class NoManTUI(App):
         try:
             if self._orchestrator:
                 result = await self._orchestrator.run(task)
-                output.write(result)
-                self.write_history(f"$ {task}\n{result}")
+                output.write("")
+                for line in result.strip().split("\n"):
+                    output.write(f"  {line}")
+                output.write("")
+                self.write_history(f"❯ {task}\n{result}")
                 self._metrics.state = TUIState.COMPLETE
             else:
                 output.write("Error: No orchestrator configured")
