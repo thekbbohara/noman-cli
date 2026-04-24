@@ -6,11 +6,13 @@ import asyncio
 from dataclasses import dataclass
 from enum import Enum
 
+from rich.console import Console
+from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal
 from textual.events import Key
 from textual.reactive import reactive
-from textual.widgets import Input, Static, Log
+from textual.widgets import Input, Static, RichLog
 
 
 class TUIState(Enum):
@@ -48,7 +50,7 @@ class NoManTUI(App):
     _metrics = reactive(TUIMetrics)
     _last_result_full = ""
     _expanded = False
-    _result_lines = []
+    _console = Console()
 
     def __init__(self, orchestrator=None, **kwargs):
         super().__init__(**kwargs)
@@ -58,7 +60,7 @@ class NoManTUI(App):
         with Container():
             with Horizontal(id="header"):
                 yield Static("NoMan v0.0.01", id="status")
-            yield Log(id="output")
+            yield RichLog(id="output")
             with Horizontal(id="input-area"):
                 yield Input(placeholder="Enter task...", id="input", valid_empty=False)
 
@@ -85,16 +87,20 @@ class NoManTUI(App):
 
     def action_expand(self) -> None:
         self._expanded = not self._expanded
-        output = self.query_one("#output", Log)
+        output = self.query_one("#output", RichLog)
         output.clear()
-        for line in self._result_lines:
-            output.write(line)
+        if self._expanded:
+            output.write(self._last_result_full)
+        else:
+            lines = self._last_result_full.strip().split("\n")
+            for line in lines[:3]:
+                output.write(line)
+            if len(lines) > 3:
+                output.write("... (press Ctrl+E to see all)")
 
     def action_switch_model(self) -> None:
         providers = self._load_providers()
         if not providers:
-            output = self.query_one("#output", Log)
-            output.write("No providers configured")
             return
 
         import os
@@ -108,7 +114,8 @@ class NoManTUI(App):
         os.makedirs(os.path.dirname(config_path), exist_ok=True)
         open(config_path, "w").write(new_provider)
 
-        output = self.query_one("#output", Log)
+        output = self.query_one("#output", RichLog)
+        output.clear()
         output.write(f"Provider: {new_provider} (restart to apply)")
 
     def _load_providers(self) -> list[str]:
@@ -133,61 +140,14 @@ class NoManTUI(App):
         with open(history_file, "a") as f:
             f.write(text + "\n")
 
-    def format_for_display(self, text: str) -> list[str]:
-        """Format response for display."""
-        import re
-        lines = text.strip().split("\n")
-        result = []
-
-        in_code = False
-        code_lines = []
-
-        for line in lines:
-            if line.strip().startswith("```"):
-                if in_code:
-                    result.append("┌" + "─" * 40)
-                    for cl in code_lines:
-                        result.append(f"│ {cl}")
-                    result.append("└" + "─" * 40)
-                    code_lines = []
-                else:
-                    code_lines = []
-                in_code = not in_code
-                continue
-
-            if in_code:
-                code_lines.append(line)
-                continue
-
-            if line.startswith("### "):
-                result.append("")
-                result.append(f"━━━ {line[4:]} ━━━")
-            elif line.startswith("## "):
-                result.append("")
-                result.append(f"━━ {line[3:]}")
-            elif line.startswith("# "):
-                result.append(f"◆ {line[2:]}")
-            elif line.strip().startswith(("- ", "* ", "+ ")):
-                line_clean = line.strip()[2:].strip()
-                line_clean = re.sub(r"\*\*(.+?)\*\*", r"[\1]", line_clean)
-                result.append(f"◇ {line_clean}")
-            elif "**" in line:
-                line = re.sub(r"\*\*(.+?)\*\*", r"[\1]", line)
-                result.append(line)
-            elif line.strip():
-                result.append(line)
-
-        return result
-
     async def run_task(self, task: str) -> None:
         self._metrics.state = TUIState.INITIALIZING
         self.update_status()
         self.hide_input()
 
-        output = self.query_one("#output", Log)
-        output.write("")
-        output.write(f"❯ {task}")
-        output.write("─" * 40)
+        output = self.query_one("#output", RichLog)
+        output.clear()
+        output.write(f"[bold]❯[/bold] {task}")
 
         self._metrics.state = TUIState.RUNNING
         self.update_status()
@@ -196,24 +156,15 @@ class NoManTUI(App):
             if self._orchestrator:
                 result = await self._orchestrator.run(task)
                 self._last_result_full = result
-                lines = self.format_for_display(result)
-                self._result_lines = lines
                 self._expanded = False
-
-                for line in lines[:3]:
-                    output.write(line)
-
-                if len(lines) > 3:
-                    output.write("")
-                    output.write(f"... press Ctrl+E to expand ({len(lines)} lines)")
-
+                output.write(result)
                 self.write_history(f"❯ {task}\n{result}")
                 self._metrics.state = TUIState.COMPLETE
             else:
-                output.write("Error: No orchestrator configured")
+                output.write("[red]Error: No orchestrator configured[/red]")
                 self._metrics.state = TUIState.ERROR
         except Exception as e:
-            output.write(f"Error: {e}")
+            output.write(f"[red]Error: {e}[/red]")
             self._metrics.state = TUIState.ERROR
 
         self._metrics.turn_count += 1
