@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from textual.app import App, ComposeResult
-from textual.containers import Container, Horizontal
+from textual.containers import Container, Horizontal, Vertical
 from textual.events import Key
 from textual.reactive import reactive
 from textual.widgets import Input, Static, Log
@@ -34,6 +34,8 @@ class NoManTUI(App):
     #header { dock: top; height: 3; background: $panel; color: $text; }
     #status { width: 100%; content-align: center middle; }
     #output { height: 100%; border: solid $border; background: $surface; }
+    #response-container { height: auto; max-height: 5; }
+    #response-preview { color: $text-muted; }
     #input-area { dock: bottom; height: 3; background: $panel; }
     #input { width: 100%; }
     """
@@ -48,6 +50,7 @@ class NoManTUI(App):
     _metrics = reactive(TUIMetrics)
     _last_result_full = ""
     _expanded = False
+    _result_lines = []
 
     def __init__(self, orchestrator=None, **kwargs):
         super().__init__(**kwargs)
@@ -84,12 +87,10 @@ class NoManTUI(App):
 
     def action_expand(self) -> None:
         self._expanded = not self._expanded
-        if self._last_result_full:
-            output = self.query_one("#output", Log)
-            output.clear()
-            lines = self._last_result_full.strip().split("\n") if self._expanded else self._last_result_full.strip().split("\n")[:100]
-            for line in self.render_markdown("\n".join(lines)):
-                output.write(f"{line}\n")
+        output = self.query_one("#output", Log)
+        output.clear()
+        for line in self._result_lines:
+            output.write(line)
 
     def action_switch_model(self) -> None:
         providers = self._load_providers()
@@ -134,49 +135,50 @@ class NoManTUI(App):
         with open(history_file, "a") as f:
             f.write(text + "\n")
 
-    def format_response(self, result: str, max_lines: int = 100) -> list[str]:
-        lines = result.strip().split("\n")
-        if len(lines) <= max_lines:
-            return lines
-        shown = lines[:max_lines]
-        shown.append(f"... ({len(lines) - max_lines} more lines)")
-        return shown
-
-    def render_markdown(self, text: str) -> list[str]:
+    def format_for_display(self, text: str) -> list[str]:
+        """Format response for display."""
         import re
-        output = []
-        in_code = False
+        lines = text.strip().split("\n")
+        result = []
 
-        for line in text.strip().split("\n"):
+        in_code = False
+        code_lines = []
+
+        for line in lines:
             if line.strip().startswith("```"):
+                if in_code:
+                    lang = code_lines[0] if code_lines else ""
+                    result.append("┌" + "─" * 40)
+                    for cl in code_lines[1:]:
+                        result.append(f"│ {cl}")
+                    result.append("└" + "─" * 40)
+                    code_lines = []
+                else:
+                    code_lines = [line.strip()[3:]]
                 in_code = not in_code
-                output.append(line)
                 continue
+
             if in_code:
-                output.append(line)
+                code_lines.append(line)
                 continue
 
             if line.startswith("### "):
-                output.append("")
-                output.append(f"━━━ {line[4:]} ━━━")
-                output.append("")
+                result.append("")
+                result.append(f"━━━ {line[4:]} ━━━")
             elif line.startswith("## "):
-                output.append("")
-                output.append(f"━━ {line[3:]} ━━")
-                output.append("")
+                result.append("")
+                result.append(f"━━ {line[3:]}")
             elif line.startswith("# "):
-                output.append("")
-                output.append(f"◆ {line[2:]}")
-                output.append("")
+                result.append(f"◆ {line[2:]}")
             elif "**" in line:
                 line = re.sub(r"\*\*(.+?)\*\*", r"[\1]", line)
-                output.append(line)
+                result.append(line)
             elif line.strip().startswith(("- ", "* ", "+ ")):
-                output.append(f"  ◇ {line.strip()[2:].strip()}")
+                result.append(f"  ◇ {line.strip()[2:].strip()}")
             elif line.strip():
-                output.append(line)
+                result.append(line)
 
-        return output
+        return result
 
     async def run_task(self, task: str) -> None:
         self._metrics.state = TUIState.INITIALIZING
@@ -186,7 +188,7 @@ class NoManTUI(App):
         output = self.query_one("#output", Log)
         output.write("")
         output.write(f"❯ {task}")
-        output.write("─" * 40)
+        output.write("��" * 40)
 
         self._metrics.state = TUIState.RUNNING
         self.update_status()
@@ -195,8 +197,18 @@ class NoManTUI(App):
             if self._orchestrator:
                 result = await self._orchestrator.run(task)
                 self._last_result_full = result
-                output.write("")
-                output.write(result)
+                lines = self.format_for_display(result)
+                self._result_lines = lines
+                self._expanded = False
+
+                # Show preview (first 3 lines)
+                for line in lines[:3]:
+                    output.write(line)
+
+                if len(lines) > 3:
+                    output.write("")
+                    output.write(f"... press Ctrl+E to expand ({len(lines)} lines)")
+
                 self.write_history(f"❯ {task}\n{result}")
                 self._metrics.state = TUIState.COMPLETE
             else:
