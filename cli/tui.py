@@ -8,7 +8,6 @@ from enum import Enum
 
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal
-from textual.binding import Binding
 from textual.events import Key
 from textual.reactive import reactive
 from textual.widgets import Input, Static, Log
@@ -24,47 +23,24 @@ class TUIState(Enum):
 
 @dataclass
 class TUIMetrics:
-    """Runtime metrics."""
     turn_count: int = 0
     tokens_used: int = 0
     state: TUIState = TUIState.IDLE
 
 
 class NoManTUI(App):
-    """NoMan interactive TUI."""
+    CSS = """
+    Screen { background: $surface; }
+    #header { dock: top; height: 3; background: $panel; color: $text; }
+    #status { width: 100%; content-align: center middle; }
+    #output { height: 100%; border: solid $border; }
+    #input-area { dock: bottom; height: 3; background: $panel; }
+    #input { width: 100%; }
+    """
 
     BINDINGS = [
-        Binding("enter", "submit", "Submit", show=False),
-        Binding("ctrl+c", "cancel", "Cancel", show=False),
+        ("ctrl+c", "cancel", "Cancel", show=False),
     ]
-
-    CSS = """
-    Screen {
-        background: $surface;
-    }
-    #header {
-        dock: top;
-        height: 3;
-        background: $panel;
-        color: $text;
-    }
-    #status {
-        width: 100%;
-        content-align: center middle;
-    }
-    #output {
-        height: 100%;
-        border: solid $border;
-    }
-    #input-area {
-        dock: bottom;
-        height: 3;
-        background: $panel;
-    }
-    #input {
-        width: 100%;
-    }
-    """
 
     _orchestrator = None
     _metrics = reactive(TUIMetrics)
@@ -86,15 +62,10 @@ class NoManTUI(App):
         self.query_one("#input", Input).focus()
 
     def on_key(self, event: Key) -> None:
-        print(f"KEY: {event.key!r}")
         if event.key == "enter":
             self.action_submit()
-        elif event.key == "ctrl+c":
-            self.action_cancel()
 
     def action_submit(self) -> None:
-        """Handle Enter key to submit task."""
-        print("ACTION_SUBMIT called")
         input_widget = self.query_one("#input", Input)
         task = input_widget.value.strip()
         if not task:
@@ -103,14 +74,11 @@ class NoManTUI(App):
         asyncio.create_task(self.run_task(task))
 
     def action_cancel(self) -> None:
-        """Handle Ctrl+C to cancel."""
         self._metrics.state = TUIState.IDLE
         self.update_status()
         self.show_input()
 
     async def run_task(self, task: str) -> None:
-        """Execute a task through the orchestrator."""
-        print(f"RUN_TASK: {task}")
         self._metrics.state = TUIState.INITIALIZING
         self.update_status()
         self.hide_input()
@@ -124,6 +92,7 @@ class NoManTUI(App):
         try:
             if self._orchestrator:
                 result = await self._orchestrator.run(task)
+                output.write("")
                 output.write(result)
                 self._metrics.state = TUIState.COMPLETE
             else:
@@ -153,16 +122,13 @@ class NoManTUI(App):
             status.update(f"Turn {m.turn_count} | {m.tokens_used} tokens | error")
 
     def hide_input(self) -> None:
-        inp = self.query_one("#input-area", Horizontal)
-        inp.display = False
+        self.query_one("#input-area", Horizontal).display = False
 
     def show_input(self) -> None:
-        inp = self.query_one("#input-area", Horizontal)
-        inp.display = True
+        self.query_one("#input-area", Horizontal).display = True
         self.query_one("#input", Input).focus()
 
 
 def run_tui(orchestrator=None) -> None:
-    """Run the TUI app."""
     app = NoManTUI(orchestrator=orchestrator)
     app.run()
