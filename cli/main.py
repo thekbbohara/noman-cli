@@ -26,7 +26,7 @@ def _setup_debug_logging() -> None:
 
 def _load_config() -> dict:
     """Load user config from file."""
-    config_path = Path("user/config.toml")
+    config_path = Path(__file__).resolve().parents[1] / "user" / "config.toml"
     if not config_path.exists():
         return _default_config()
 
@@ -73,6 +73,12 @@ def _create_orchestrator(args) -> Orchestrator | None:
     if not provider_config:
         logger.error(f"Provider '{provider_name}' not found")
         return None
+
+    # Inject max_context_tokens from config if not set on provider
+    if not provider_config.get("max_context_tokens"):
+        token_budget = config.get("model", {}).get("token_budget", {})
+        if token_budget.get("max_tokens"):
+            provider_config = dict(provider_config, max_context_tokens=token_budget["max_tokens"])
 
     # Create adapter
     try:

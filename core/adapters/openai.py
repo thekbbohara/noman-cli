@@ -33,7 +33,7 @@ class OpenAIAdapterConfig:
     base_url: str = "https://api.openai.com/v1"
     api_key: str = "sk-"
     model: str = "gpt-4o-mini"
-    max_context_tokens: int = 16000
+    max_context_tokens: int = 0
     max_output_tokens: int = 4096
     timeout: float = 60.0
 
@@ -47,7 +47,7 @@ class OpenAIAdapter(BaseAdapter):
             base_url=config.get("base_url", "https://api.openai.com/v1"),
             api_key=config.get("api_key", ""),
             model=config.get("model", "gpt-4o-mini"),
-            max_context_tokens=config.get("max_context_tokens", 16000),
+            max_context_tokens=config.get("max_context_tokens", 0),
             max_output_tokens=config.get("max_output_tokens", 4096),
             timeout=config.get("timeout", 60.0),
         )
@@ -153,16 +153,23 @@ class OpenAIAdapter(BaseAdapter):
 
     async def probe_capabilities(self) -> ModelCapabilities:
         """Probe provider capabilities."""
-        base_model = self._cfg.model.split("-")[0].split(":")[0]
-        context_limit = DEFAULT_CONTEXT_LIMITS.get(base_model, DEFAULT_CONTEXT_LIMITS["default"])
+        model_key = self._cfg.model.lower().split(".gguf")[0]
+        limit = DEFAULT_CONTEXT_LIMITS["default"]
+        for key in sorted(DEFAULT_CONTEXT_LIMITS.keys(), key=len, reverse=True):
+            if key == "default":
+                continue
+            if model_key.startswith(key.lower()) or model_key == key.lower():
+                limit = DEFAULT_CONTEXT_LIMITS[key]
+                break
 
+        max_ctx = self._cfg.max_context_tokens or limit
         return ModelCapabilities(
             model_name=self._cfg.model,
-            max_context_tokens=self._cfg.max_context_tokens or context_limit,
+            max_context_tokens=max_ctx,
             max_output_tokens=self._cfg.max_output_tokens,
             supports_tool_calling=True,
             supports_streaming=True,
-            safe_context_limit=int(context_limit * 0.8),
+            safe_context_limit=int(max_ctx * 0.8),
         )
 
     @property

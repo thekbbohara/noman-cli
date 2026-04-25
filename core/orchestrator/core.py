@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from dataclasses import dataclass, field
@@ -63,16 +64,20 @@ class ReActStep:
 
 
 class PromptAssembler:
-    AVAILABLE_TOOLS = (
-    "run_shell, list_dir, read_file, search_code, glob, find, write_file, "
-    "append_file, mkdir, copy_file, move_file, delete_file, path_exists, path_type, "
-    "git_status, git_current_branch, git_push, git_reset, git_delete_branch, "
-    "get_env, set_env, list_processes, kill_process, docker_ps, docker_logs, docker_exec, "
-    "run_tests, explain_code, find_symbol, find_references, get_file_tree, list_imports, "
-    "memory_search, skill_list, skill_load"
-)
+    def __init__(self, tools: ToolBus, context: ContextManager | None = None) -> None:
+        self._tools = tools
+        self._context = context
 
-    SYSTEM_PROMPT = f"""You are NoMan, an autonomous coding agent.
+    @property
+    def AVAILABLE_TOOLS(self) -> str:
+        """Dynamically generate the tool list from registered tools."""
+        tool_names = self._tools.list_tools() or []
+        return ", ".join(tool_names)
+
+    @property
+    def SYSTEM_PROMPT(self) -> str:
+        tools_list = self.AVAILABLE_TOOLS
+        return f"""You are NoMan, an autonomous coding agent.
 
 You operate within a token budget. Be concise and efficient.
 
@@ -82,21 +87,17 @@ Response format — you MUST return this structure:
 
 RULES:
 - `is_final_result: false` → you MUST include tool_calls. Do not return empty tool_calls.
-- `is_final_result: true` → `content` must be your complete final answer. No tool_calls.
+- `is_final_result: true` → `content` must be the complete final answer. No tool_calls.
 - NEVER return `is_final_result: true` while still having tools to call.
 - ALWAYS call a tool if you need to check, search, read, or verify information.
 
-Available tools: {AVAILABLE_TOOLS}
+Available tools: {tools_list}
 
 Workflow per turn:
 1. REASON - Think about what to do
 2. ACT - Execute a tool or respond
 3. OBSERVE - Process the result
 4. FINAL - When you have the complete answer, set is_final_result: true"""
-
-    def __init__(self, tools: ToolBus, context: ContextManager | None = None) -> None:
-        self._tools = tools
-        self._context = context
 
     def assemble(
         self, session: Session, task: str, budget: int,
@@ -120,9 +121,6 @@ Workflow per turn:
                 remaining -= len(turn.assistant_output)
             for result in turn.tool_results:
                 messages.append(Message(role="user", content=f"Result: {result}"))
-                remaining -= len(result)
-            if remaining < 1000:
-                break
                 remaining -= len(result)
             if remaining < 1000:
                 break
@@ -152,12 +150,10 @@ Workflow per turn:
         # Return last ~2000 chars to stay within budget
         return content[-2000:] if len(content) > 2000 else content
 
-    def get_context_tokens(self) -> int:
-        """Return auto-detected context window size."""
-        return self._context_tokens
-
 
 class Orchestrator:
+    MAX_TOOL_ITERATIONS = 20  # Hard cap to prevent infinite loops
+
     def __init__(
         self,
         adapter: BaseAdapter,
@@ -180,13 +176,12 @@ class Orchestrator:
             base_delay_sec=1.0,
             retryable_exceptions=(ConnectionError, TimeoutError),
         ))
-        # Auto-detect context window from adapter capabilities
-        self._context_tokens = self._probe_context_tokens()
+        self._context_tokens: int | None = None
 
-    def _probe_context_tokens(self) -> int:
+    async def _probe_context_tokens(self) -> int:
         """Probe adapter for context window size."""
         try:
-            caps = self._adapter.probe_capabilities()
+            caps = await self._adapter.capabilities()
             return caps.max_context_tokens
         except Exception:
             logger.warning("Could not probe context window, using default")
@@ -215,7 +210,6 @@ class Orchestrator:
             logger.exception("Unexpected adapter error")
             return None
         finally:
-            # Debug: save raw response to file
             self._save_debug(messages)
 
     async def run(self, task: str) -> str:
@@ -227,13 +221,15 @@ class Orchestrator:
         return response
 
     async def _execute_turn_with_tools(self, task: str) -> str:
-        # Use auto-detected context window, with 20% buffer for model output
+        if self._context_tokens is None:
+            self._context_tokens = await self._probe_context_tokens()
         budget = int(self._context_tokens * 0.8)
         messages, tool_defs = self._assembler.assemble(
             self._current_session, task, budget,
         )
 
-        for iteration in range(self._cfg.max_tool_calls_per_turn):
+        consecutive_non_tool_responses = 0
+        for iteration in range(self.MAX_TOOL_ITERATIONS):
             self._state = OrchestratorState.PLANNING
             response = await self._resilient_chat(messages, tool_defs)
             if response is None:
@@ -254,7 +250,16 @@ class Orchestrator:
             just_executed_tools = iteration > 0 and any(
                 "Result:" in str(m.content) for m in messages if m.role == "user"
             )
-            if just_executed_tools and not parsed_calls and raw_content.strip():
+
+            # Count consecutive non-tool responses
+            if is_final:
+                consecutive_non_tool_responses = 0
+            elif just_executed_tools and not parsed_calls and raw_content.strip():
+                consecutive_non_tool_responses += 1
+                if consecutive_non_tool_responses >= 3:
+                    logger.warning("Model stuck in loop, returning last content")
+                    return content or raw_content
+
                 messages.append(Message(role="assistant", content=raw_content))
                 messages.append(Message(
                     role="user",
@@ -281,25 +286,29 @@ class Orchestrator:
                 ))
                 continue
 
+            consecutive_non_tool_responses = 0
+
             for tc in parsed_calls:
                 self._state = OrchestratorState.EXECUTING
                 tool_name = tc.get("function", {}).get("name", "")
                 args = tc.get("function", {}).get("arguments", {})
                 if isinstance(args, str):
                     try:
-                        import json
                         args = json.loads(args)
                     except Exception:
                         args = {}
 
                 if tool_name not in self._tools.list_tools():
                     result_str = f"Unknown tool: {tool_name}"
+                    logger.warning("Unknown tool: %s", tool_name)
                 else:
                     try:
                         result = await self._tools.execute(tool_name, args)
                         result_str = str(result)
+                        logger.info("Tool %s executed, result_len=%d", tool_name, len(result_str))
                     except Exception as e:
                         result_str = f"Error: {e}"
+                        logger.error("Tool %s failed: %s", tool_name, e)
 
                 messages.append(Message(role="assistant", content=raw_content, tool_calls=[tc]))
                 messages.append(Message(
@@ -312,8 +321,6 @@ class Orchestrator:
         self, raw_content: str, api_tool_calls: list,
     ) -> tuple[bool, str, list]:
         """Parse is_final_result from model JSON response."""
-        import json
-
         if not raw_content:
             return False, "", api_tool_calls or []
 
@@ -321,93 +328,18 @@ class Orchestrator:
         try:
             parsed = json.loads(raw_content)
         except (json.JSONDecodeError, ValueError):
-            # Not JSON — treat as plain text response (model gave up)
+            return True, raw_content, []
+
+        if not isinstance(parsed, dict):
             return True, raw_content, []
 
         is_final = bool(parsed.get("is_final_result", True))
         content = parsed.get("content", "") or ""
-        # Prefer API tool_calls, fall back to parsed JSON tool_calls
         parsed_calls = api_tool_calls or parsed.get("tool_calls", [])
+        parsed_calls = _flatten_tool_calls(parsed_calls)
+        if is_final and parsed_calls:
+            is_final = False
         return is_final, content, parsed_calls
-
-    async def _react_loop(self, task: str, turn_num: int) -> list[ReActStep]:
-        if self._context:
-            self._context.get_context(self._cfg.max_tokens_per_turn)
-
-        messages, tool_defs = self._assembler.assemble(
-            self._current_session, task, self._cfg.max_tokens_per_turn,
-        )
-
-        self._state = OrchestratorState.PLANNING
-        response = await self._resilient_chat(messages, tool_defs)
-        if response is None:
-            return [ReActStep(thought="AI provider unreachable", action="respond", is_final=True)]
-
-        steps = self._parse_react_response(response.content)
-        if not steps:
-            steps = [ReActStep(thought=response.content, action="respond", is_final=True)]
-
-        self._state = OrchestratorState.OBSERVING
-        return steps
-
-    def _parse_react_response(self, response: str) -> list[ReActStep]:
-        steps: list[ReActStep] = []
-        lines = response.split("\n")
-        current_thought = ""
-        current_action = ""
-        is_final = False
-
-        for line in lines:
-            line = line.strip()
-            if line.startswith("Thought:") or line.startswith("Think:"):
-                if current_thought:
-                    steps.append(ReActStep(
-                        thought=current_thought, action=current_action, is_final=is_final,
-                    ))
-                current_thought = line.split(":", 1)[1].strip()
-                current_action = ""
-                is_final = False
-            elif line.startswith("Action:") or line.startswith("Act:"):
-                current_action = line.split(":", 1)[1].strip()
-            elif line.startswith("Observation:") or line.startswith("Obs:"):
-                observation = line.split(":", 1)[1].strip()
-                if not is_final:
-                    steps.append(ReActStep(
-                        thought=current_thought, action=current_action, observation=observation,
-                    ))
-                    current_thought = ""
-                    current_action = ""
-            elif line.startswith("Final:") or line.startswith("Answer:"):
-                current_thought += " " + line.split(":", 1)[1].strip()
-                is_final = True
-
-        if current_thought:
-            steps.append(ReActStep(
-                thought=current_thought, action=current_action, is_final=is_final,
-            ))
-
-        if not steps and response.strip():
-            steps.append(ReActStep(thought=response.strip(), action="respond", is_final=True))
-
-        return steps
-
-    async def _execute_action(self, action: str) -> str:
-        self._state = OrchestratorState.EXECUTING
-        parts = action.split(maxsplit=1)
-        if not parts:
-            return "No action specified"
-        tool_name = parts[0]
-        args: dict[str, str] = {}
-        if len(parts) > 1:
-            for ap in parts[1].split():
-                if "=" in ap:
-                    k, v = ap.split("=", 1)
-                    args[k] = v
-        try:
-            result = await self._tools.execute(tool_name, args)
-            return str(result)
-        except Exception as e:
-            return f"Error executing {tool_name}: {e}"
 
     def _new_session_id(self) -> str:
         return str(uuid.uuid4())[:8]
@@ -430,3 +362,27 @@ class Orchestrator:
     @property
     def session(self) -> Session | None:
         return self._current_session
+
+
+def _flatten_tool_calls(calls) -> list:
+    """Recursively flatten and normalize tool calls from any nesting level."""
+    if not isinstance(calls, list):
+        return []
+    result = []
+    for tc in calls:
+        if not isinstance(tc, dict):
+            continue
+        if "function" in tc:
+            result.append(tc)
+        elif "name" in tc:
+            result.append({
+                "id": tc.get("id", f"call_{tc['name']}"),
+                "type": "function",
+                "function": {
+                    "name": tc["name"],
+                    "arguments": tc.get("args") or tc.get("arguments") or "{}",
+                },
+            })
+        elif "tool_calls" in tc:
+            result.extend(_flatten_tool_calls(tc["tool_calls"]))
+    return result
