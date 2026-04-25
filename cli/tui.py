@@ -6,12 +6,13 @@ import asyncio
 import re
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal
 from textual.events import Key
 from textual.reactive import reactive
-from textual.widgets import Input, Static, RichLog
+from textual.widgets import Input, RichLog, Static
 
 
 class TUIState(Enum):
@@ -49,6 +50,8 @@ class NoManTUI(App):
     _metrics = reactive(TUIMetrics)
     _last_result_full = ""
     _expanded = False
+    # Force text-only clipboard — no image upload, no vision errors
+    CLIPBOARD_READ_COMMAND: str | None = ""
 
     def __init__(self, orchestrator=None, **kwargs):
         super().__init__(**kwargs)
@@ -73,7 +76,6 @@ class NoManTUI(App):
     def _convert_markdown_to_textual(self, text: str) -> list:
         """Convert markdown to Rich Text objects."""
         from rich.text import Text
-        import re
 
         lines = []
         in_code = False
@@ -150,23 +152,21 @@ class NoManTUI(App):
         if not providers:
             return
 
-        import os
-        config_path = os.path.expanduser("~/.noman/provider.txt")
-        current = open(config_path).read().strip() if os.path.exists(config_path) else "default"
+        config_path = Path("~/.noman/provider.txt").expanduser()
+        current = config_path.read_text().strip() if config_path.exists() else "default"
 
         current_idx = providers.index(current) if current in providers else 0
         next_idx = (current_idx + 1) % len(providers)
         new_provider = providers[next_idx]
 
-        os.makedirs(os.path.dirname(config_path), exist_ok=True)
-        open(config_path, "w").write(new_provider)
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(new_provider)
 
         output = self.query_one("#output", RichLog)
         output.clear()
         output.write(f"[green]Provider: {new_provider}[/green] (restart)")
 
     def _load_providers(self) -> list[str]:
-        from pathlib import Path
         config_path = Path.cwd() / "user" / "config.toml"
         if not config_path.exists():
             return []
@@ -181,11 +181,9 @@ class NoManTUI(App):
             return []
 
     def write_history(self, text: str) -> None:
-        from pathlib import Path
         history_file = Path.home() / ".noman" / "history.txt"
         history_file.parent.mkdir(exist_ok=True)
-        with open(history_file, "a") as f:
-            f.write(text + "\n")
+        history_file.open("a").write(text + "\n")
 
     async def run_task(self, task: str) -> None:
         self._metrics.state = TUIState.INITIALIZING
@@ -207,10 +205,7 @@ class NoManTUI(App):
 
                 lines = self._convert_markdown_to_textual(result)
                 for line in lines[:5]:
-                    if isinstance(line, str):
-                        output.write(line)
-                    else:
-                        output.write(line)  # Rich Text object
+                    output.write(line)
                 if len(lines) > 5:
                     output.write("[i]... (Ctrl+E to expand)[/i]")
 

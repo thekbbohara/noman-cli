@@ -8,10 +8,12 @@ from enum import Enum
 from typing import Any
 
 from core.adapters import BaseAdapter, Message
-from core.context import ContextManager, ContextView
-from core.errors import BudgetExceededError
+from core.adapters.base import ToolDefinition
+from core.context import ContextManager
+from core.errors.circuit_breaker import CircuitBreaker, CircuitBreakerOpenError
 from core.memory import MemorySystem
 from core.tools import ToolBus
+from core.utils.retry import RetryConfig, RetryManager
 
 logger = logging.getLogger(__name__)
 
@@ -79,8 +81,6 @@ Your workflow per turn:
 2. ACT - Execute a tool or respond
 3. OBSERVE - Process the result
 
-Available tools: {tool_names}
-
 Before acting, check if you have the context you need.
 Use JIT loading to fetch specific code when needed.
 """
@@ -94,30 +94,23 @@ Use JIT loading to fetch specific code when needed.
         session: Session,
         task: str,
         budget: int,
-    ) -> list[Message]:
-        """Assemble prompt for a turn."""
+    ) -> tuple[list[Message], list[ToolDefinition]]:
+        """Assemble prompt for a turn. Returns (messages, tool_defs)."""
         messages: list[Message] = []
 
         # System prompt
-        tool_names = ", ".join(self._tools.list_tools() or ["none"])
-        system_content = self.SYSTEM_PROMPT.format(tool_names=tool_names)
+        system_content = self.SYSTEM_PROMPT
         messages.append(Message(role="system", content=system_content))
 
         # Prior turns (truncated to fit budget)
         remaining = budget - len(system_content)
         for turn in session.turns[-5:]:
             if turn.assistant_output:
-                messages.append(Message(
-                    role="assistant",
-                    content=turn.assistant_output,
-                ))
+                messages.append(Message(role="assistant", content=turn.assistant_output))
                 remaining -= len(turn.assistant_output)
 
             for result in turn.tool_results:
-                messages.append(Message(
-                    role="user",
-                    content=f"Result: {result}",
-                ))
+                messages.append(Message(role="user", content=f"Result: {result}"))
                 remaining -= len(result)
 
             if remaining < 1000:
@@ -126,7 +119,22 @@ Use JIT loading to fetch specific code when needed.
         # Current task
         messages.append(Message(role="user", content=task))
 
-        return messages
+        # Build tool definitions from registered tools
+        tool_defs = self._build_tool_defs()
+        return messages, tool_defs
+
+    def _build_tool_defs(self) -> list[ToolDefinition]:
+        """Convert registered Tool objects to ToolDefinition for the model."""
+        defs = []
+        for name in self._tools.list_tools() or []:
+            tool = self._tools._tools.get(name)
+            if tool:
+                defs.append(ToolDefinition(
+                    name=tool.name,
+                    description=tool.description,
+                    parameters=tool.parameters,
+                ))
+        return defs
 
 
 class Orchestrator:
@@ -148,121 +156,116 @@ class Orchestrator:
         self._assembler = PromptAssembler(tools, context)
         self._state = OrchestratorState.IDLE
         self._current_session: Session | None = None
+        self._breaker = CircuitBreaker("adapter")
+        self._retry = RetryManager(RetryConfig(
+            max_attempts=3,
+            base_delay_sec=1.0,
+            retryable_exceptions=(ConnectionError, TimeoutError),
+        ))
+
+    async def _resilient_chat(
+        self, messages: list[Message], tool_defs: list[ToolDefinition],
+    ) -> Any:
+        """adapter.chat() wrapped with circuit breaker + retry + error boundary."""
+        import httpx
+
+        async def _call():
+            return await self._adapter.chat(messages, tool_defs)
+
+        try:
+            async def _call_with_retry():
+                return await self._retry.execute(_call)
+
+            return await self._breaker.call(_call_with_retry)
+        except CircuitBreakerOpenError:
+            logger.error("Circuit breaker OPEN — adapter unavailable")
+            return None
+        except (ConnectionError, TimeoutError, httpx.HTTPError, httpx.TimeoutException):
+            logger.error("Adapter call failed after retries")
+            return None
+        except Exception:
+            logger.exception("Unexpected adapter error")
+            return None
 
     async def run(self, task: str) -> str:
         """Run a task to completion. Returns final response."""
         self._current_session = Session(id=self._new_session_id())
-
-        # Execute turn with potential tool calls
         turn = Turn(user_input=task)
         response = await self._execute_turn_with_tools(task)
         turn.assistant_output = response
         self._current_session.turns.append(turn)
-
         return response
 
     async def _execute_turn_with_tools(self, task: str) -> str:
-        """Execute a turn with tool call parsing and execution."""
-        messages = self._assembler.assemble(
-            self._current_session,
-            task,
-            self._cfg.max_tokens_per_turn,
+        """Execute a turn with native tool-calling loop."""
+        messages, tool_defs = self._assembler.assemble(
+            self._current_session, task, self._cfg.max_tokens_per_turn,
         )
 
         for _ in range(self._cfg.max_tool_calls_per_turn):
             self._state = OrchestratorState.PLANNING
-            response = await self._adapter.chat(messages)
+            response = await self._resilient_chat(messages, tool_defs)
+            if response is None:
+                return "Sorry, I couldn't reach the AI provider. Check your network and try again."
             content = response.content
 
-            # Check for tool call pattern: `run_shell "command"`
-            tool_result = await self._maybe_execute_tool(content)
-            if tool_result is None:
-                # No tool call detected, return as final response
-                return content
+            # Use native tool_calls if adapter returned them
+            tool_calls = response.tool_calls
+            if not tool_calls:
+                return content  # No more tool calls → final response
 
-            # Tool was executed, add result and continue loop
-            self._state = OrchestratorState.EXECUTING
-            result_str = str(tool_result)
-            messages.append(Message(role="assistant", content=content))
-            messages.append(Message(role="user", content=f"Result: {result_str}"))
+            # Execute each tool call
+            for tc in tool_calls:
+                self._state = OrchestratorState.EXECUTING
+                tool_name = tc.get("function", {}).get("name", "")
+                args = tc.get("function", {}).get("arguments", {})
 
-        # Max iterations reached
-        return content
+                if isinstance(args, str):
+                    import json
+                    try:
+                        args = json.loads(args)
+                    except Exception:
+                        args = {}
 
-    async def _maybe_execute_tool(self, response: str) -> str | None:
-        """Parse and execute tool call from response. Returns None if no tool call."""
-        import re
+                if tool_name not in self._tools.list_tools():
+                    result_str = f"Unknown tool: {tool_name}"
+                else:
+                    try:
+                        result = await self._tools.execute(tool_name, args)
+                        result_str = str(result)
+                    except Exception as e:
+                        result_str = f"Error: {e}"
 
-        # Match patterns like: run_shell "pwd", run_shell 'pwd', run_shell(pwd), list_dir(".")
-        patterns = [
-            (r'run_shell\s+["\']([^"\']+)["\']', "run_shell", "command"),
-            (r'run_shell\s*\(\s*["\']([^"\']+)["\']\s*\)', "run_shell", "command"),
-            (r'run_shell\(["\']([^"\']+)["\']\)', "run_shell", "command"),
-            (r'list_dir\s+["\']([^"\']+)["\']', "list_dir", "path"),
-            (r'list_dir\s*\(\s*["\']([^"\']+)["\']\s*\)', "list_dir", "path"),
-            (r'list_dir\(["\']([^"\']+)["\']\)', "list_dir", "path"),
-            (r'list_dir\(([^)]+)\)', "list_dir", "path"),
-        ]
+                messages.append(Message(
+                    role="assistant",
+                    content="",
+                    tool_calls=[tc],
+                ))
+                messages.append(Message(
+                    role="user",
+                    content=result_str,
+                    tool_call_id=tc.get("id", ""),
+                ))
 
-        for pattern, tool_name, param in patterns:
-            match = re.search(pattern, response)
-            if match:
-                value = match.group(1)
-                try:
-                    result = await self._tools.execute(tool_name, {param: value})
-                    return result
-                except Exception as e:
-                    return f"Error: {e}"
-
-        # Fallback: try to extract any shell command
-        match = re.search(r'`(pwd|ls|ls -la|cat .+?)`', response)
-        if match:
-            command = match.group(1)
-            try:
-                result = await self._tools.execute("run_shell", {"command": command})
-                return result
-            except Exception as e:
-                return f"Error: {e}"
-
-        return None
+        return content  # Max iterations reached
 
     async def _react_loop(self, task: str, turn_num: int) -> list[ReActStep]:
         """Execute ReAct reasoning for one turn."""
-        # Get context
-        context_view: ContextView | None = None
         if self._context:
-            context_view = self._context.get_context(self._cfg.max_tokens_per_turn)
+            self._context.get_context(self._cfg.max_tokens_per_turn)
 
-        # Assemble messages
-        messages = self._assembler.assemble(
-            self._current_session,
-            task,
-            self._cfg.max_tokens_per_turn,
+        messages, tool_defs = self._assembler.assemble(
+            self._current_session, task, self._cfg.max_tokens_per_turn,
         )
 
-        # Get tool definitions
-        tool_defs = None
-        tool_list = self._tools.list_tools()
-        if tool_list:
-            # Simplified - would use ToolDefinition from bus
-            tool_defs = None
-
-        # Call model
         self._state = OrchestratorState.PLANNING
-        response = await self._adapter.chat(messages, tool_defs)
+        response = await self._resilient_chat(messages, tool_defs)
+        if response is None:
+            return [ReActStep(thought="AI provider unreachable", action="respond", is_final=True)]
 
-        # Parse response into ReAct steps
         steps = self._parse_react_response(response.content)
-
         if not steps:
-            # Plain response - treat as final answer
-            steps = [
-                ReActStep(
-                    thought=response.content,
-                    action="respond",
-                    is_final=True,
-                )
-            ]
+            steps = [ReActStep(thought=response.content, action="respond", is_final=True)]
 
         self._state = OrchestratorState.OBSERVING
         return steps
@@ -315,7 +318,6 @@ class Orchestrator:
                 is_final=is_final,
             ))
 
-        # If no valid steps, treat entire response as final answer
         if not steps and response.strip():
             steps.append(ReActStep(
                 thought=response.strip(),
@@ -329,17 +331,14 @@ class Orchestrator:
         """Execute a tool action."""
         self._state = OrchestratorState.EXECUTING
 
-        # Parse action (simple format: "tool_name arg")
         parts = action.split(maxsplit=1)
         if not parts:
             return "No action specified"
 
         tool_name = parts[0]
-        args = {}
+        args: dict[str, str] = {}
         if len(parts) > 1:
-            # Simple arg parsing
-            arg_parts = parts[1].split()
-            for ap in arg_parts:
+            for ap in parts[1].split():
                 if "=" in ap:
                     k, v = ap.split("=", 1)
                     args[k] = v
