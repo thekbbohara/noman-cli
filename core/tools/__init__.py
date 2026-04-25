@@ -255,6 +255,33 @@ SCHEMA_TREE: dict = _s({
 
 SCHEMA_EMPTY: dict = _s({"type": "object", "properties": {}})
 
+SCHEMA_PREVIEW: dict = _s({
+    "type": "object",
+    "properties": {
+        "path": {"type": "string"},
+        "new_content": {"type": "string"},
+    },
+    "required": ["path", "new_content"],
+})
+
+SCHEMA_EDIT: dict = _s({
+    "type": "object",
+    "properties": {
+        "path": {"type": "string"},
+        "old_content": {"type": "string"},
+        "new_content": {"type": "string"},
+    },
+    "required": ["path", "old_content", "new_content"],
+})
+
+SCHEMA_SYMBOL_QUERY: dict = _s({
+    "type": "object",
+    "properties": {
+        "query": {"type": "string"},
+    },
+    "required": ["query"],
+})
+
 
 # ── Handlers ──────────────────────────────────────────────────────────────────
 
@@ -732,6 +759,10 @@ def create_toolbus(cwd: str | Path = ".") -> ToolBus:
         Tool("memory_search", "Search the memory store", SCHEMA_MEM_SEARCH, memory_search, 100),
         Tool("skill_list", "List available procedural skills", SCHEMA_EMPTY, skill_list, 50),
         Tool("skill_load", "Load a procedural skill into context", SCHEMA_SKILL, skill_load, 200),
+        Tool("diff_preview", "Show diff between current and new file content", SCHEMA_PREVIEW, diff_preview, 50),
+        Tool("edit_file", "Edit content in a file", SCHEMA_EDIT, edit_file, 100),
+        Tool("find_definition", "Find where a symbol is defined", SCHEMA_FIND_SYM, find_definition, 50),
+        Tool("search_symbols", "Search for symbols by name", SCHEMA_SYMBOL_QUERY, search_symbols, 50),
     ]
 
     for tool in tools:
