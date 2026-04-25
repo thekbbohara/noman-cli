@@ -43,7 +43,7 @@ class MemoryEntry:
 class MemoryConfig:
     """Configuration for memory system."""
 
-    db_path: str | Path = ".noman/memory.db"
+    db_path: str | Path = str(Path.home() / ".noman" / "memory.db")
     default_ttl_days: int = 7
     max_memories: int = 10000
 
