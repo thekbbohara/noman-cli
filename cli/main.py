@@ -26,7 +26,7 @@ def _setup_debug_logging() -> None:
 
 def _load_config() -> dict:
     """Load user config from file."""
-    config_path = Path(__file__).resolve().parents[1] / "user" / "config.toml"
+    config_path = Path.home() / ".noman" / "config.toml"
     if not config_path.exists():
         return _default_config()
 
