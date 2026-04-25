@@ -36,6 +36,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="help",
         help="Show this help message and exit",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug logging",
+    )
     return parser
 
 

@@ -12,11 +12,16 @@ from core.adapters import create_adapter
 from core.context import ContextManager
 from core.memory import MemorySystem
 from core.orchestrator import Orchestrator, OrchestratorConfig
-from core.security import FilesystemSandbox
-from core.tools import ToolBus
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
+
+
+def _setup_debug_logging() -> None:
+    """Enable DEBUG logging if --debug flag is set."""
+    if os.environ.get("NOMAN_DEBUG"):
+        logging.getLogger().setLevel(logging.DEBUG)
+        logging.basicConfig(level=logging.DEBUG, format="%(levelname)s: %(message)s")
 
 
 def _load_config() -> dict:
@@ -55,7 +60,8 @@ def _create_orchestrator(args) -> Orchestrator | None:
     config = _load_config()
 
     # Use --provider flag if provided, otherwise from model.default or default_provider
-    provider_name = args.provider or config.get("model", {}).get("default") or config.get("default_provider", "default")
+    provider_name = args.provider or config.get("model", {}).get("default") \
+        or config.get("default_provider", "default")
 
     # Support both list and dict formats
     providers = config.get("providers", [])
@@ -102,6 +108,10 @@ def _create_orchestrator(args) -> Orchestrator | None:
 
 def main(argv=None):
     args = parse_args(argv)
+
+    if args.debug:
+        os.environ["NOMAN_DEBUG"] = "1"
+        _setup_debug_logging()
 
     if args.command == "doctor":
         print("NoMan doctor: checking configuration...")

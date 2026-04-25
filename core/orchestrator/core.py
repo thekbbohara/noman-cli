@@ -102,15 +102,27 @@ Workflow per turn:
         self, session: Session, task: str, budget: int,
     ) -> tuple[list[Message], list[ToolDefinition]]:
         messages: list[Message] = []
+
+        # Load conversation history
+        history = self._load_history()
+        history_len = len(history) if history else 0
+        if history:
+            history_msg = f"Previous conversation:\n{history}\n\n---"
+            messages.append(Message(role="system", content=history_msg))
+
         messages.append(Message(role="system", content=self.SYSTEM_PROMPT))
 
-        remaining = budget - len(self.SYSTEM_PROMPT)
+        # Calculate remaining budget accounting for history
+        remaining = budget - len(self.SYSTEM_PROMPT) - history_len
         for turn in session.turns[-5:]:
             if turn.assistant_output:
                 messages.append(Message(role="assistant", content=turn.assistant_output))
                 remaining -= len(turn.assistant_output)
             for result in turn.tool_results:
                 messages.append(Message(role="user", content=f"Result: {result}"))
+                remaining -= len(result)
+            if remaining < 1000:
+                break
                 remaining -= len(result)
             if remaining < 1000:
                 break
@@ -129,6 +141,20 @@ Workflow per turn:
                     parameters=tool.parameters,
                 ))
         return defs
+
+    def _load_history(self) -> str:
+        """Load conversation history from ~/.noman/history.txt."""
+        from pathlib import Path
+        history_file = Path.home() / ".noman" / "history.txt"
+        if not history_file.exists():
+            return ""
+        content = history_file.read_text()
+        # Return last ~2000 chars to stay within budget
+        return content[-2000:] if len(content) > 2000 else content
+
+    def get_context_tokens(self) -> int:
+        """Return auto-detected context window size."""
+        return self._context_tokens
 
 
 class Orchestrator:
@@ -154,6 +180,17 @@ class Orchestrator:
             base_delay_sec=1.0,
             retryable_exceptions=(ConnectionError, TimeoutError),
         ))
+        # Auto-detect context window from adapter capabilities
+        self._context_tokens = self._probe_context_tokens()
+
+    def _probe_context_tokens(self) -> int:
+        """Probe adapter for context window size."""
+        try:
+            caps = self._adapter.probe_capabilities()
+            return caps.max_context_tokens
+        except Exception:
+            logger.warning("Could not probe context window, using default")
+            return self._cfg.max_tokens_per_turn
 
     async def _resilient_chat(
         self, messages: list[Message], tool_defs: list[ToolDefinition],
@@ -190,8 +227,10 @@ class Orchestrator:
         return response
 
     async def _execute_turn_with_tools(self, task: str) -> str:
+        # Use auto-detected context window, with 20% buffer for model output
+        budget = int(self._context_tokens * 0.8)
         messages, tool_defs = self._assembler.assemble(
-            self._current_session, task, self._cfg.max_tokens_per_turn,
+            self._current_session, task, budget,
         )
 
         for iteration in range(self._cfg.max_tool_calls_per_turn):
@@ -202,6 +241,11 @@ class Orchestrator:
 
             tool_calls = response.tool_calls
             raw_content = response.content or ""
+
+            # Log raw response for debugging
+            log_msg = (f"[iter={iteration}] tool_calls={bool(tool_calls)}, "
+                       f"content_len={len(raw_content)}, content={raw_content[:200]}...")
+            logger.debug(log_msg)
 
             # Parse is_final_result from JSON content
             is_final, content, parsed_calls = self._parse_response(raw_content, tool_calls)
