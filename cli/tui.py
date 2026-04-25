@@ -226,9 +226,27 @@ class NoManTUI(App):
             return []
 
     def write_history(self, text: str) -> None:
-        history_file = Path.home() / ".noman" / "history.txt"
-        history_file.parent.mkdir(exist_ok=True)
-        history_file.open("a").write(text + "\n")
+        session_dir = Path.home() / ".noman" / "session"
+        session_dir.mkdir(exist_ok=True)
+
+        # Save to session file with timestamp
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        session_file = session_dir / f"{timestamp}.md"
+
+        # Build session content - append if exists
+        prev = session_file.read_text() if session_file.exists() else ""
+
+        content = f"# Session {session_dir.glob('*.md').__len__() + 1}\n\n"
+        content += f"**Time:** {datetime.now().isoformat()}\n\n"
+        content += "---\n\n"
+
+        if prev:
+            content = prev.rstrip() + f"\n> {text}\n"
+        else:
+            content += f"> {text}\n"
+
+        session_file.write_text(content + "\n")
 
     async def run_task(self, task: str) -> None:
         self._metrics.state = TUIState.INITIALIZING
