@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import re
+import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -17,6 +19,49 @@ from core.utils.retry import RetryConfig, RetryManager
 
 logger = logging.getLogger(__name__)
 
+_LAZY_SIGNALS: tuple[str, ...] = (
+    r"let me (check|look|see|find|search|run|get)",
+    r"i('ll| will| can) (check|look|see|find|search|run|get)",
+    r"(first|let me) (see|check|look at|search for|find)",
+    r"let me (see|check|look)",
+    r"i can (check|look|see)",
+    r"checking\.\.\.",
+    r"looking\.\.\.",
+    r"(let me|i('ll)?)?\s+(search|check|find|look|run)",
+)
+
+_LAZY_INTENTS: tuple[tuple[str, str, callable], ...] = (
+    (r"git (status|branch|log|diff)", "git_status", lambda _: {}),
+    (r"\bls\b|list (the )?files", "list_dir", lambda r: {"path": _ep(r, ".")}),
+    (r"read .*file|file .*content|cat ", "read_file", lambda r: {"path": _ep(r, ".")}),
+    (r"search (code|grep)", "search_code", lambda r: {"pattern": _efp(r), "path": "."}),
+    (r"run (the )?tests?", "run_tests", lambda _: {"path": ".", "pattern": "test"}),
+    (r"show (me )?tree|directory tree", "get_file_tree", lambda _: {"path": ".", "max_depth": 3}),
+    (r"find .*file", "find", lambda r: {"name": _efn(r), "path": "."}),
+    (r"check .*(network|curl|ping)", "run_shell", lambda _: {
+        "command": "curl -sI https://example.com | head -1"}),
+    (r"memory|recall|remember", "memory_search", lambda r: {"query": _efp(r)}),
+    (r"skills?", "skill_list", lambda _: {}),
+    (r"processes|ps |running", "list_processes", lambda _: {}),
+    (r"docker (ps|containers)", "docker_ps", lambda _: {}),
+)
+
+
+def _ep(text: str, default: str) -> str:
+    for m in re.findall(r'(?:in |of |from |`)([\w/\-.]+)', text):
+        return m
+    return default
+
+
+def _efp(text: str) -> str:
+    m = re.search(r'(?:for |pattern )["\']([^"\']+)["\']', text)
+    return m.group(1) if m else "."
+
+
+def _efn(text: str) -> str:
+    m = re.search(r'(?:file |named )["\']([^"\']+)["\']', text)
+    return m.group(1) if m else "*"
+
 
 class OrchestratorState(Enum):
     IDLE = "idle"
@@ -29,8 +74,6 @@ class OrchestratorState(Enum):
 
 @dataclass
 class Turn:
-    """Single turn in a conversation."""
-
     user_input: str
     assistant_output: str = ""
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
@@ -40,8 +83,6 @@ class Turn:
 
 @dataclass
 class Session:
-    """A complete session with multiple turns."""
-
     id: str
     turns: list[Turn] = field(default_factory=list)
     total_tokens: int = 0
@@ -50,8 +91,6 @@ class Session:
 
 @dataclass
 class OrchestratorConfig:
-    """Configuration for orchestrator."""
-
     max_turns: int = 20
     max_tokens_per_turn: int = 8000
     max_tool_calls_per_turn: int = 10
@@ -61,8 +100,6 @@ class OrchestratorConfig:
 
 @dataclass
 class ReActStep:
-    """Single step in ReAct reasoning."""
-
     thought: str
     action: str
     observation: str = ""
@@ -70,8 +107,6 @@ class ReActStep:
 
 
 class PromptAssembler:
-    """Assemble prompts from context, memory, and conversation."""
-
     SYSTEM_PROMPT = """You are NoMan, an autonomous coding agent.
 
 You operate within a token budget. Be concise and efficient.
@@ -90,41 +125,26 @@ Use JIT loading to fetch specific code when needed.
         self._context = context
 
     def assemble(
-        self,
-        session: Session,
-        task: str,
-        budget: int,
+        self, session: Session, task: str, budget: int,
     ) -> tuple[list[Message], list[ToolDefinition]]:
-        """Assemble prompt for a turn. Returns (messages, tool_defs)."""
         messages: list[Message] = []
+        messages.append(Message(role="system", content=self.SYSTEM_PROMPT))
 
-        # System prompt
-        system_content = self.SYSTEM_PROMPT
-        messages.append(Message(role="system", content=system_content))
-
-        # Prior turns (truncated to fit budget)
-        remaining = budget - len(system_content)
+        remaining = budget - len(self.SYSTEM_PROMPT)
         for turn in session.turns[-5:]:
             if turn.assistant_output:
                 messages.append(Message(role="assistant", content=turn.assistant_output))
                 remaining -= len(turn.assistant_output)
-
             for result in turn.tool_results:
                 messages.append(Message(role="user", content=f"Result: {result}"))
                 remaining -= len(result)
-
             if remaining < 1000:
                 break
 
-        # Current task
         messages.append(Message(role="user", content=task))
-
-        # Build tool definitions from registered tools
-        tool_defs = self._build_tool_defs()
-        return messages, tool_defs
+        return messages, self._build_tool_defs()
 
     def _build_tool_defs(self) -> list[ToolDefinition]:
-        """Convert registered Tool objects to ToolDefinition for the model."""
         defs = []
         for name in self._tools.list_tools() or []:
             tool = self._tools._tools.get(name)
@@ -138,8 +158,6 @@ Use JIT loading to fetch specific code when needed.
 
 
 class Orchestrator:
-    """Main orchestrator with ReAct loop."""
-
     def __init__(
         self,
         adapter: BaseAdapter,
@@ -166,7 +184,6 @@ class Orchestrator:
     async def _resilient_chat(
         self, messages: list[Message], tool_defs: list[ToolDefinition],
     ) -> Any:
-        """adapter.chat() wrapped with circuit breaker + retry + error boundary."""
         import httpx
 
         async def _call():
@@ -188,7 +205,6 @@ class Orchestrator:
             return None
 
     async def run(self, task: str) -> str:
-        """Run a task to completion. Returns final response."""
         self._current_session = Session(id=self._new_session_id())
         turn = Turn(user_input=task)
         response = await self._execute_turn_with_tools(task)
@@ -197,7 +213,6 @@ class Orchestrator:
         return response
 
     async def _execute_turn_with_tools(self, task: str) -> str:
-        """Execute a turn with native tool-calling loop."""
         messages, tool_defs = self._assembler.assemble(
             self._current_session, task, self._cfg.max_tokens_per_turn,
         )
@@ -208,21 +223,21 @@ class Orchestrator:
             if response is None:
                 return "Sorry, I couldn't reach the AI provider. Check your network and try again."
             content = response.content
-
-            # Use native tool_calls if adapter returned them
             tool_calls = response.tool_calls
-            if not tool_calls:
-                return content  # No more tool calls → final response
 
-            # Execute each tool call
+            if not tool_calls:
+                follow_up = await self._lazy_completion(content, messages, tool_defs)
+                if follow_up:
+                    continue
+                return content
+
             for tc in tool_calls:
                 self._state = OrchestratorState.EXECUTING
                 tool_name = tc.get("function", {}).get("name", "")
                 args = tc.get("function", {}).get("arguments", {})
-
                 if isinstance(args, str):
-                    import json
                     try:
+                        import json
                         args = json.loads(args)
                     except Exception:
                         args = {}
@@ -236,21 +251,39 @@ class Orchestrator:
                     except Exception as e:
                         result_str = f"Error: {e}"
 
+                messages.append(Message(role="assistant", content="", tool_calls=[tc]))
                 messages.append(Message(
-                    role="assistant",
-                    content="",
-                    tool_calls=[tc],
-                ))
-                messages.append(Message(
-                    role="user",
-                    content=result_str,
-                    tool_call_id=tc.get("id", ""),
+                    role="user", content=result_str, tool_call_id=tc.get("id", ""),
                 ))
 
-        return content  # Max iterations reached
+        return content
+
+    async def _lazy_completion(
+        self, response_text: str, messages: list[Message], tool_defs: list[ToolDefinition],
+    ) -> bool:
+        """Detect unfulfilled tool promises and auto-execute. Returns True if follow-up made."""
+        if not any(re.search(p, response_text, re.IGNORECASE) for p in _LAZY_SIGNALS):
+            return False
+
+        for pattern, tool_name, arg_fn in _LAZY_INTENTS:
+            if tool_name not in self._tools.list_tools():
+                continue
+            if not re.search(pattern, response_text, re.IGNORECASE):
+                continue
+            args = arg_fn(response_text)
+            try:
+                result = await self._tools.execute(tool_name, args)
+                result_str = str(result)
+            except Exception as e:
+                result_str = f"Error: {e}"
+            messages.append(Message(role="assistant", content=response_text))
+            messages.append(Message(role="user", content=result_str))
+            logger.info("Lazy completion: executed %s for unfulfilled promise", tool_name)
+            return True
+
+        return False
 
     async def _react_loop(self, task: str, turn_num: int) -> list[ReActStep]:
-        """Execute ReAct reasoning for one turn."""
         if self._context:
             self._context.get_context(self._cfg.max_tokens_per_turn)
 
@@ -271,70 +304,51 @@ class Orchestrator:
         return steps
 
     def _parse_react_response(self, response: str) -> list[ReActStep]:
-        """Parse model response into ReAct steps."""
         steps: list[ReActStep] = []
         lines = response.split("\n")
-
         current_thought = ""
         current_action = ""
         is_final = False
 
         for line in lines:
             line = line.strip()
-
             if line.startswith("Thought:") or line.startswith("Think:"):
                 if current_thought:
                     steps.append(ReActStep(
-                        thought=current_thought,
-                        action=current_action,
-                        is_final=is_final,
+                        thought=current_thought, action=current_action, is_final=is_final,
                     ))
                 current_thought = line.split(":", 1)[1].strip()
                 current_action = ""
                 is_final = False
-
             elif line.startswith("Action:") or line.startswith("Act:"):
                 current_action = line.split(":", 1)[1].strip()
-
             elif line.startswith("Observation:") or line.startswith("Obs:"):
                 observation = line.split(":", 1)[1].strip()
                 if not is_final:
                     steps.append(ReActStep(
-                        thought=current_thought,
-                        action=current_action,
-                        observation=observation,
+                        thought=current_thought, action=current_action, observation=observation,
                     ))
                     current_thought = ""
                     current_action = ""
-
             elif line.startswith("Final:") or line.startswith("Answer:"):
                 current_thought += " " + line.split(":", 1)[1].strip()
                 is_final = True
 
         if current_thought:
             steps.append(ReActStep(
-                thought=current_thought,
-                action=current_action,
-                is_final=is_final,
+                thought=current_thought, action=current_action, is_final=is_final,
             ))
 
         if not steps and response.strip():
-            steps.append(ReActStep(
-                thought=response.strip(),
-                action="respond",
-                is_final=True,
-            ))
+            steps.append(ReActStep(thought=response.strip(), action="respond", is_final=True))
 
         return steps
 
     async def _execute_action(self, action: str) -> str:
-        """Execute a tool action."""
         self._state = OrchestratorState.EXECUTING
-
         parts = action.split(maxsplit=1)
         if not parts:
             return "No action specified"
-
         tool_name = parts[0]
         args: dict[str, str] = {}
         if len(parts) > 1:
@@ -342,7 +356,6 @@ class Orchestrator:
                 if "=" in ap:
                     k, v = ap.split("=", 1)
                     args[k] = v
-
         try:
             result = await self._tools.execute(tool_name, args)
             return str(result)
@@ -350,7 +363,6 @@ class Orchestrator:
             return f"Error executing {tool_name}: {e}"
 
     def _new_session_id(self) -> str:
-        import uuid
         return str(uuid.uuid4())[:8]
 
     @property
