@@ -33,11 +33,12 @@ class TUIMetrics:
 class NoManTUI(App):
     CSS = """
     Screen { background: transparent; }
+    App { background: transparent; }
     #header { dock: top; height: 3; background: transparent; color: $text; }
     #status { width: 100%; content-align: center middle; }
-    #output { height: 100%; border: none; background: transparent; overflow-y: auto; }
+    #output { height: 100%; border: none; background: transparent; color: $text; overflow-y: auto; }
     #input-area { dock: bottom; height: 3; background: transparent; }
-    #input { width: 100%; }
+    #input { width: 100%; background: transparent; }
     """
 
     BINDINGS = [
