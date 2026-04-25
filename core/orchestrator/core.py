@@ -187,6 +187,11 @@ class Orchestrator:
             logger.warning("Could not probe context window, using default")
             return self._cfg.max_tokens_per_turn
 
+    @property
+    def tool_bus(self) -> ToolBus:
+        """Access tool bus."""
+        return self._tools
+
     async def _resilient_chat(
         self, messages: list[Message], tool_defs: list[ToolDefinition],
     ) -> Any:

@@ -70,8 +70,7 @@ class NoManTUI(App):
             with Horizontal(id="input-area"):
                 yield Input(placeholder="Enter task...", id="input", valid_empty=False)
 
-    def on_mount(self) -> None:
-        self.update_status()
+def on_mount(self) -> None:
         self.query_one("#input", Input).focus()
         # Log available tools on startup
         if self._orchestrator:
