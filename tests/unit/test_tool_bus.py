@@ -1,5 +1,6 @@
 """Tests for the hardened Tool Bus."""
 
+import os
 import tempfile
 
 import pytest
@@ -7,6 +8,7 @@ import pytest
 from core.errors import ToolNotFoundError, ToolSignatureError, ToolValidationError
 from core.security.fs_sandbox import FilesystemSandbox
 from core.security.signing import ToolSigner
+from core.tools import diff_preview
 from core.tools.bus import Tool, ToolBus
 
 
@@ -75,3 +77,21 @@ async def test_signed_tool_rejected():
                 name="bad", description="tampered",
                 parameters={}, handler=lambda: 1, signature="deadbeef",
             ))
+
+
+def test_diff_preview_returns_unified_diff():
+    """Given current file content and new content, returns unified diff."""
+    with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
+        f.write("line1\nline2\nline3\n")
+        f.flush()
+        path = f.name
+
+    new_content = "line1\nmodified\nline3\n"
+    result = diff_preview(path, new_content)
+
+    assert "---" in result
+    assert "+++" in result
+    assert "-line2" in result
+    assert "+modified" in result
+
+    os.unlink(path)

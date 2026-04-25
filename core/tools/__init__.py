@@ -330,6 +330,28 @@ def append_file(path: str, content: str) -> str:
         return f"Permission denied: {path}"
 
 
+def diff_preview(path: str, new_content: str) -> str:
+    """Show unified diff between current file and new content."""
+    from difflib import unified_diff
+    p = Path(path)
+    if not p.exists():
+        return f"File not found: {path}"
+
+    current_lines = p.read_text().splitlines(keepends=True)
+    new_lines = new_content.splitlines(keepends=True)
+
+    diff = list(unified_diff(
+        current_lines, new_lines,
+        fromfile=str(path), tofile=str(path),
+        lineterm=""
+    ))
+
+    if not diff:
+        return "No changes"
+
+    return "\n".join(diff)
+
+
 def mkdir_tool(path: str, parents: bool = False) -> str:
     p = Path(path)
     try:
