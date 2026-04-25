@@ -52,6 +52,9 @@ def _default_config() -> dict:
             }
         },
         "default_provider": "default",
+        "model": {
+            "max_tool_calls_per_turn": 10,
+        },
     }
 
 
@@ -99,10 +102,11 @@ def _create_orchestrator(args) -> Orchestrator | None:
 
     # Create orchestrator
     max_calls = getattr(args, 'max_calls', None)
+    config_max_calls = config.get("model", {}).get("max_tool_calls_per_turn", 10)
     orch_config = OrchestratorConfig(
         max_turns=20,
         max_tokens_per_turn=8000,
-        max_tool_calls_per_turn=max_calls if max_calls else 10,
+        max_tool_calls_per_turn=max_calls if max_calls else config_max_calls,
     )
 
     return Orchestrator(
