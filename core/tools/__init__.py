@@ -13,6 +13,11 @@ from core.tools.bus import Tool, ToolBus
 EDIT_HISTORY: list[dict] = []
 
 
+def clear_edit_history() -> None:
+    """Clear edit history."""
+    EDIT_HISTORY.clear()
+
+
 def _s(schema: dict) -> dict:
     """Shorthand JSON Schema builder."""
     return schema
@@ -396,13 +401,16 @@ def edit_file(path: str, old_content: str, new_content: str) -> str:
         return f"Found {count} occurrences - use replace_all for multiple replacements"
 
     updated = current.replace(old_content, new_content)
-    p.write_text(updated)
 
-    EDIT_HISTORY.append({
-        "path": str(p),
-        "old": old_content,
-        "new": new_content,
-    })
+    try:
+        p.write_text(updated)
+        EDIT_HISTORY.append({
+            "path": str(p),
+            "old": old_content,
+            "new": new_content,
+        })
+    except Exception:
+        raise
 
     return f"Applied change to {path}"
 
@@ -779,4 +787,4 @@ def create_toolbus(cwd: str | Path = ".") -> ToolBus:
     return bus
 
 
-__all__ = ["Tool", "ToolBus", "create_toolbus"]
+__all__ = ["Tool", "ToolBus", "create_toolbus", "EDIT_HISTORY", "clear_edit_history"]
