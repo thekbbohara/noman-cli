@@ -191,7 +191,7 @@ class Orchestrator:
             self._current_session, task, self._cfg.max_tokens_per_turn,
         )
 
-        for _ in range(self._cfg.max_tool_calls_per_turn):
+        for iteration in range(self._cfg.max_tool_calls_per_turn):
             self._state = OrchestratorState.PLANNING
             response = await self._resilient_chat(messages, tool_defs)
             if response is None:
@@ -203,15 +203,27 @@ class Orchestrator:
             # Parse is_final_result from JSON content
             is_final, content, parsed_calls = self._parse_response(raw_content, tool_calls)
 
+            # If plain text (not JSON) after tool results → model gave up
+            just_executed_tools = iteration > 0 and any(
+                "Result:" in str(m.content) for m in messages if m.role == "user"
+            )
+            if just_executed_tools and not parsed_calls and raw_content.strip():
+                messages.append(Message(role="assistant", content=raw_content))
+                messages.append(Message(
+                    role="user",
+                    content=(
+                        "You received tool results — use them. Call more tools if needed, "
+                        "or synthesize results into final answer."
+                    ),
+                ))
+                continue
+
             if is_final:
                 return content or raw_content
 
             # is_final = false → must have tool_calls
             if not parsed_calls:
-                messages.append(Message(
-                    role="assistant",
-                    content=raw_content,
-                ))
+                messages.append(Message(role="assistant", content=raw_content))
                 messages.append(Message(
                     role="user",
                     content=(
