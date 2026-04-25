@@ -14,6 +14,8 @@ from textual.events import Key
 from textual.reactive import reactive
 from textual.widgets import Input, RichLog, Static
 
+from core.tools import EDIT_HISTORY
+
 
 class TUIState(Enum):
     IDLE = "idle"
@@ -151,30 +153,40 @@ class NoManTUI(App):
                 output.write("[i]... (Ctrl+E for full)[/i]")
 
     def action_diff_view(self) -> None:
-        if not self._last_result_full:
-            return
         output = self.query_one("#output", RichLog)
         output.clear()
         from difflib import unified_diff
         from rich.text import Text
-        lines = self._last_task.split("\n") if self._last_task else []
-        result_lines = self._last_result_full.split("\n")
-        diff = list(unified_diff(lines, result_lines, lineterm=""))
-        if not diff:
-            output.write("[yellow]No diff available - run a task first[/yellow]")
+
+        if not EDIT_HISTORY:
+            output.write("[yellow]No file edits yet[/yellow]")
             return
-        output.write("[bold]Diff View:[/bold]")
-        for line in diff:
-            if line.startswith("+++") or line.startswith("---"):
-                output.write(Text(line, style="dim"))
-            elif line.startswith("+"):
-                output.write(Text(line, style="green bold"))
-            elif line.startswith("-"):
-                output.write(Text(line, style="red strike"))
-            elif line.startswith("@@"):
-                output.write(Text(line, style="cyan"))
-            else:
-                output.write(line)
+
+        for edit in EDIT_HISTORY[-5:]:
+            path = edit["path"]
+            old_content = edit["old"]
+            new_content = edit["new"]
+
+            old_lines = old_content.splitlines(keepends=True)
+            new_lines = new_content.splitlines(keepends=True)
+
+            diff = list(unified_diff(old_lines, new_lines, fromfile=path, tofile=path, lineterm=""))
+
+            if not diff:
+                continue
+
+            output.write(f"\n[bold]Edit: {path}[/bold]")
+            for line in diff:
+                if line.startswith("+++") or line.startswith("---"):
+                    continue
+                elif line.startswith("+"):
+                    output.write(Text(line, style="green bold"))
+                elif line.startswith("-"):
+                    output.write(Text(line, style="red strike"))
+                elif line.startswith("@@"):
+                    output.write(Text(line, style="cyan"))
+                else:
+                    output.write(line)
 
     def action_switch_model(self) -> None:
         providers = self._load_providers()

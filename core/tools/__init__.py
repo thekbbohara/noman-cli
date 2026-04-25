@@ -10,6 +10,8 @@ from pathlib import Path
 from core.security.fs_sandbox import FilesystemSandbox
 from core.tools.bus import Tool, ToolBus
 
+EDIT_HISTORY: list[dict] = []
+
 
 def _s(schema: dict) -> dict:
     """Shorthand JSON Schema builder."""
@@ -395,6 +397,12 @@ def edit_file(path: str, old_content: str, new_content: str) -> str:
 
     updated = current.replace(old_content, new_content)
     p.write_text(updated)
+
+    EDIT_HISTORY.append({
+        "path": str(p),
+        "old": old_content,
+        "new": new_content,
+    })
 
     return f"Applied change to {path}"
 
