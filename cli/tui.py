@@ -73,6 +73,10 @@ class NoManTUI(App):
     def on_mount(self) -> None:
         self.update_status()
         self.query_one("#input", Input).focus()
+        # Log available tools on startup
+        if self._orchestrator:
+            tools = self._orchestrator.tool_bus.list_tools()
+            print(f"[LOG] Loaded {len(tools)} tools: {', '.join(tools[:10])}{'...' if len(tools) > 10 else ''}")
 
     def on_key(self, event: Key) -> None:
         if event.key == "enter":

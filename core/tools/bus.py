@@ -51,7 +51,7 @@ class ToolBus:
                     f"Tool '{tool.name}' has an invalid signature"
                 )
         self._tools[tool.name] = tool
-        logger.info("Registered tool: %s", tool.name)
+        # logger.info("Registered tool: %s", tool.name)
 
     def list_tools(self) -> list[str]:
         return list(self._tools.keys())

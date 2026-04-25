@@ -98,9 +98,11 @@ def _create_orchestrator(args) -> Orchestrator | None:
     memory = MemorySystem()
 
     # Create orchestrator
+    max_calls = getattr(args, 'max_calls', None)
     orch_config = OrchestratorConfig(
         max_turns=20,
         max_tokens_per_turn=8000,
+        max_tool_calls_per_turn=max_calls if max_calls else 10,
     )
 
     return Orchestrator(

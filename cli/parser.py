@@ -41,6 +41,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Enable debug logging",
     )
+    parser.add_argument(
+        "--max-calls",
+        type=int,
+        default=10,
+        help="Max tool calls per turn (default: 10)",
+    )
     return parser
 
 
