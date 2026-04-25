@@ -32,6 +32,22 @@ class TUIMetrics:
     state: TUIState = TUIState.IDLE
 
 
+class TrackedRichLog(RichLog):
+    """RichLog subclass that tracks written content for export."""
+    content: str = ""
+    def write(self, *args, **kwargs) -> None:
+        if args:
+            text = str(args[0])
+            self.content += text + "\n"
+        super().write(*args, **kwargs)
+    def write_markup(self, markup: str, style: str | None = None) -> None:
+        self.content += markup + "\n"
+        super().write_markup(markup, style)
+    def clear(self) -> None:
+        self.content = ""
+        super().clear()
+
+
 class NoManTUI(App):
     CSS = """
     Screen { background: transparent; }
@@ -47,6 +63,7 @@ class NoManTUI(App):
         ("ctrl+c", "cancel", "Cancel"),
         ("ctrl+e", "expand", "Expand"),
         ("ctrl+d", "diff_view", "Diff"),
+        ("ctrl+s", "save_output", "Save Output"),
         ("f2", "switch_model", "Model"),
     ]
 
@@ -55,6 +72,7 @@ class NoManTUI(App):
     _last_result_full = ""
     _last_task = ""
     _expanded = False
+    _output_buffer: str = ""  # mirrors what's written to the RichLog
     # Force text-only clipboard — no image upload, no vision errors
     CLIPBOARD_READ_COMMAND: str | None = ""
 
@@ -66,7 +84,7 @@ class NoManTUI(App):
         with Container():
             with Horizontal(id="header"):
                 yield Static("NoMan v0.0.01", id="status")
-            yield RichLog(id="output", markup=True, wrap=True)
+            yield TrackedRichLog(id="output", markup=True, wrap=True)
             with Horizontal(id="input-area"):
                 yield Input(placeholder="Enter task...", id="input", valid_empty=False)
 
@@ -143,7 +161,7 @@ class NoManTUI(App):
 
     def action_expand(self) -> None:
         self._expanded = not self._expanded
-        output = self.query_one("#output", RichLog)
+        output = self.query_one("#output", TrackedRichLog)
         output.clear()
 
         if self._expanded:
@@ -157,7 +175,7 @@ class NoManTUI(App):
                 output.write("[i]... (Ctrl+E for full)[/i]")
 
     def action_diff_view(self) -> None:
-        output = self.query_one("#output", RichLog)
+        output = self.query_one("#output", TrackedRichLog)
         output.clear()
         from difflib import unified_diff
         from rich.text import Text
@@ -207,7 +225,7 @@ class NoManTUI(App):
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.write_text(new_provider)
 
-        output = self.query_one("#output", RichLog)
+        output = self.query_one("#output", TrackedRichLog)
         output.clear()
         output.write(f"[green]Provider: {new_provider}[/green] (restart)")
 
@@ -225,6 +243,21 @@ class NoManTUI(App):
         except Exception:
             return []
 
+    def action_save_output(self) -> None:
+        """Dump the current output to a file so it can be copied."""
+        output = self.query_one("#output", TrackedRichLog)
+        content = output.content
+        if not content.strip():
+            self.notify("Nothing to save", severity="warning")
+            return
+        session_dir = Path.home() / ".noman" / "session"
+        session_dir.mkdir(exist_ok=True)
+        from datetime import datetime
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        file_path = session_dir / f"output_{ts}.txt"
+        file_path.write_text(content)
+        self.notify(f"Saved to {file_path}", severity="info")
+
     def write_history(self, text: str) -> None:
         session_dir = Path.home() / ".noman" / "session"
         session_dir.mkdir(exist_ok=True)
@@ -237,7 +270,8 @@ class NoManTUI(App):
         # Build session content - append if exists
         prev = session_file.read_text() if session_file.exists() else ""
 
-        content = f"# Session {session_dir.glob('*.md').__len__() + 1}\n\n"
+        session_count = sum(1 for _ in session_dir.glob("*.md"))
+        content = f"# Session {session_count + 1}\n\n"
         content += f"**Time:** {datetime.now().isoformat()}\n\n"
         content += "---\n\n"
 
@@ -249,18 +283,18 @@ class NoManTUI(App):
         session_file.write_text(content + "\n")
 
     async def run_task(self, task: str) -> None:
-        self._metrics.state = TUIState.INITIALIZING
-        self.update_status()
-        self.hide_input()
-
-        output = self.query_one("#output", RichLog)
-        output.clear()
-        output.write(f"[b]❯[/b] {task}")
-
-        self._metrics.state = TUIState.RUNNING
-        self.update_status()
-
         try:
+            self._metrics.state = TUIState.INITIALIZING
+            self.call_next(self.update_status)
+            self.call_next(self.hide_input)
+
+            output = self.query_one("#output", TrackedRichLog)
+            output.clear()
+            output.write(f"[b]❯[/b] {task}")
+
+            self._metrics.state = TUIState.RUNNING
+            self.call_next(self.update_status)
+
             if self._orchestrator:
                 result = await self._orchestrator.run(task)
                 self._last_result_full = result
@@ -279,12 +313,16 @@ class NoManTUI(App):
                 output.write("[red]Error: No orchestrator[/red]")
                 self._metrics.state = TUIState.ERROR
         except Exception as e:
-            output.write(f"[red]Error: {e}[/red]")
+            import traceback
+            output = self.query_one("#output", TrackedRichLog)
+            output.write(f"[red]Crash: {e}[/red]")
+            output.write(f"[dim]{traceback.format_exc()}[/dim]")
             self._metrics.state = TUIState.ERROR
 
-        self._metrics.turn_count += 1
-        self.update_status()
-        self.show_input()
+        finally:
+            self._metrics.turn_count += 1
+            self.call_next(self.update_status)
+            self.call_next(self.show_input)
 
     def update_status(self) -> None:
         status = self.query_one("#status", Static)
