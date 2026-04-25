@@ -177,6 +177,9 @@ class Orchestrator:
         except Exception:
             logger.exception("Unexpected adapter error")
             return None
+        finally:
+            # Debug: save raw response to file
+            self._save_debug(messages)
 
     async def run(self, task: str) -> str:
         self._current_session = Session(id=self._new_session_id())
@@ -364,6 +367,17 @@ class Orchestrator:
 
     def _new_session_id(self) -> str:
         return str(uuid.uuid4())[:8]
+
+    def _save_debug(self, messages: list[Message]) -> None:
+        """Save raw conversation to debug file."""
+        from pathlib import Path
+        debug_dir = Path.home() / ".noman" / "debug"
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        debug_file = debug_dir / f"trace_{uuid.uuid4().hex[:8]}.txt"
+        content = []
+        for m in messages:
+            content.append(f"\n=== {m.role.upper()} ===\n{m.content or ''}")
+        debug_file.write_text("\n".join(content))
 
     @property
     def state(self) -> OrchestratorState:
