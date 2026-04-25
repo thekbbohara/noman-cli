@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import re
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
@@ -18,49 +17,6 @@ from core.tools import ToolBus
 from core.utils.retry import RetryConfig, RetryManager
 
 logger = logging.getLogger(__name__)
-
-_LAZY_SIGNALS: tuple[str, ...] = (
-    r"let me (check|look|see|find|search|run|get)",
-    r"i('ll| will| can) (check|look|see|find|search|run|get)",
-    r"(first|let me) (see|check|look at|search for|find)",
-    r"let me (see|check|look)",
-    r"i can (check|look|see)",
-    r"checking\.\.\.",
-    r"looking\.\.\.",
-    r"(let me|i('ll)?)?\s+(search|check|find|look|run)",
-)
-
-_LAZY_INTENTS: tuple[tuple[str, str, callable], ...] = (
-    (r"git (status|branch|log|diff)", "git_status", lambda _: {}),
-    (r"\bls\b|list (the )?files", "list_dir", lambda r: {"path": _ep(r, ".")}),
-    (r"read .*file|file .*content|cat ", "read_file", lambda r: {"path": _ep(r, ".")}),
-    (r"search (code|grep)", "search_code", lambda r: {"pattern": _efp(r), "path": "."}),
-    (r"run (the )?tests?", "run_tests", lambda _: {"path": ".", "pattern": "test"}),
-    (r"show (me )?tree|directory tree", "get_file_tree", lambda _: {"path": ".", "max_depth": 3}),
-    (r"find .*file", "find", lambda r: {"name": _efn(r), "path": "."}),
-    (r"check .*(network|curl|ping)", "run_shell", lambda _: {
-        "command": "curl -sI https://example.com | head -1"}),
-    (r"memory|recall|remember", "memory_search", lambda r: {"query": _efp(r)}),
-    (r"skills?", "skill_list", lambda _: {}),
-    (r"processes|ps |running", "list_processes", lambda _: {}),
-    (r"docker (ps|containers)", "docker_ps", lambda _: {}),
-)
-
-
-def _ep(text: str, default: str) -> str:
-    for m in re.findall(r'(?:in |of |from |`)([\w/\-.]+)', text):
-        return m
-    return default
-
-
-def _efp(text: str) -> str:
-    m = re.search(r'(?:for |pattern )["\']([^"\']+)["\']', text)
-    return m.group(1) if m else "."
-
-
-def _efn(text: str) -> str:
-    m = re.search(r'(?:file |named )["\']([^"\']+)["\']', text)
-    return m.group(1) if m else "*"
 
 
 class OrchestratorState(Enum):
@@ -107,18 +63,36 @@ class ReActStep:
 
 
 class PromptAssembler:
-    SYSTEM_PROMPT = """You are NoMan, an autonomous coding agent.
+    AVAILABLE_TOOLS = (
+    "run_shell, list_dir, read_file, search_code, glob, find, write_file, "
+    "append_file, mkdir, copy_file, move_file, delete_file, path_exists, path_type, "
+    "git_status, git_current_branch, git_push, git_reset, git_delete_branch, "
+    "get_env, set_env, list_processes, kill_process, docker_ps, docker_logs, docker_exec, "
+    "run_tests, explain_code, find_symbol, find_references, get_file_tree, list_imports, "
+    "memory_search, skill_list, skill_load"
+)
+
+    SYSTEM_PROMPT = f"""You are NoMan, an autonomous coding agent.
 
 You operate within a token budget. Be concise and efficient.
 
-Your workflow per turn:
+Response format — you MUST return this structure:
+- If you need to use tools: `{{"content": "", "tool_calls": [...], "is_final_result": false}}`
+- If you have the answer: `{{"content": "your answer", "tool_calls": [], "is_final_result": true}}`
+
+RULES:
+- `is_final_result: false` → you MUST include tool_calls. Do not return empty tool_calls.
+- `is_final_result: true` → `content` must be your complete final answer. No tool_calls.
+- NEVER return `is_final_result: true` while still having tools to call.
+- ALWAYS call a tool if you need to check, search, read, or verify information.
+
+Available tools: {AVAILABLE_TOOLS}
+
+Workflow per turn:
 1. REASON - Think about what to do
 2. ACT - Execute a tool or respond
 3. OBSERVE - Process the result
-
-Before acting, check if you have the context you need.
-Use JIT loading to fetch specific code when needed.
-"""
+4. FINAL - When you have the complete answer, set is_final_result: true"""
 
     def __init__(self, tools: ToolBus, context: ContextManager | None = None) -> None:
         self._tools = tools
@@ -222,16 +196,33 @@ class Orchestrator:
             response = await self._resilient_chat(messages, tool_defs)
             if response is None:
                 return "Sorry, I couldn't reach the AI provider. Check your network and try again."
-            content = response.content
+
             tool_calls = response.tool_calls
+            raw_content = response.content or ""
 
-            if not tool_calls:
-                follow_up = await self._lazy_completion(content, messages, tool_defs)
-                if follow_up:
-                    continue
-                return content
+            # Parse is_final_result from JSON content
+            is_final, content, parsed_calls = self._parse_response(raw_content, tool_calls)
 
-            for tc in tool_calls:
+            if is_final:
+                return content or raw_content
+
+            # is_final = false → must have tool_calls
+            if not parsed_calls:
+                messages.append(Message(
+                    role="assistant",
+                    content=raw_content,
+                ))
+                messages.append(Message(
+                    role="user",
+                    content=(
+                        "ERROR: is_final_result: false but no tool_calls returned. "
+                        "Call the necessary tool(s), then respond with is_final_result: true "
+                        "when you have the complete answer."
+                    ),
+                ))
+                continue
+
+            for tc in parsed_calls:
                 self._state = OrchestratorState.EXECUTING
                 tool_name = tc.get("function", {}).get("name", "")
                 args = tc.get("function", {}).get("arguments", {})
@@ -251,37 +242,34 @@ class Orchestrator:
                     except Exception as e:
                         result_str = f"Error: {e}"
 
-                messages.append(Message(role="assistant", content="", tool_calls=[tc]))
+                messages.append(Message(role="assistant", content=raw_content, tool_calls=[tc]))
                 messages.append(Message(
                     role="user", content=result_str, tool_call_id=tc.get("id", ""),
                 ))
 
-        return content
+        return raw_content or "Max tool call iterations reached."
 
-    async def _lazy_completion(
-        self, response_text: str, messages: list[Message], tool_defs: list[ToolDefinition],
-    ) -> bool:
-        """Detect unfulfilled tool promises and auto-execute. Returns True if follow-up made."""
-        if not any(re.search(p, response_text, re.IGNORECASE) for p in _LAZY_SIGNALS):
-            return False
+    def _parse_response(
+        self, raw_content: str, api_tool_calls: list,
+    ) -> tuple[bool, str, list]:
+        """Parse is_final_result from model JSON response."""
+        import json
 
-        for pattern, tool_name, arg_fn in _LAZY_INTENTS:
-            if tool_name not in self._tools.list_tools():
-                continue
-            if not re.search(pattern, response_text, re.IGNORECASE):
-                continue
-            args = arg_fn(response_text)
-            try:
-                result = await self._tools.execute(tool_name, args)
-                result_str = str(result)
-            except Exception as e:
-                result_str = f"Error: {e}"
-            messages.append(Message(role="assistant", content=response_text))
-            messages.append(Message(role="user", content=result_str))
-            logger.info("Lazy completion: executed %s for unfulfilled promise", tool_name)
-            return True
+        if not raw_content:
+            return False, "", api_tool_calls or []
 
-        return False
+        raw_content = raw_content.strip()
+        try:
+            parsed = json.loads(raw_content)
+        except (json.JSONDecodeError, ValueError):
+            # Not JSON — treat as plain text response (model gave up)
+            return True, raw_content, []
+
+        is_final = bool(parsed.get("is_final_result", True))
+        content = parsed.get("content", "") or ""
+        # Prefer API tool_calls, fall back to parsed JSON tool_calls
+        parsed_calls = api_tool_calls or parsed.get("tool_calls", [])
+        return is_final, content, parsed_calls
 
     async def _react_loop(self, task: str, turn_num: int) -> list[ReActStep]:
         if self._context:
