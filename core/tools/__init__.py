@@ -352,6 +352,22 @@ def diff_preview(path: str, new_content: str) -> str:
     return "\n".join(diff)
 
 
+def edit_file(path: str, old_content: str, new_content: str) -> str:
+    """Replace old_content with new_content in file."""
+    p = Path(path).resolve()
+    if not p.exists():
+        return f"File not found: {path}"
+
+    current = p.read_text()
+    if old_content not in current:
+        return f"Old content not found in {path}"
+
+    updated = current.replace(old_content, new_content)
+    p.write_text(updated)
+
+    return f"Applied change to {path}"
+
+
 def mkdir_tool(path: str, parents: bool = False) -> str:
     p = Path(path)
     try:

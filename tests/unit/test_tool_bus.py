@@ -8,7 +8,7 @@ import pytest
 from core.errors import ToolNotFoundError, ToolSignatureError, ToolValidationError
 from core.security.fs_sandbox import FilesystemSandbox
 from core.security.signing import ToolSigner
-from core.tools import diff_preview
+from core.tools import diff_preview, edit_file
 from core.tools.bus import Tool, ToolBus
 
 
@@ -93,5 +93,24 @@ def test_diff_preview_returns_unified_diff():
     assert "+++" in result
     assert "-line2" in result
     assert "+modified" in result
+
+    os.unlink(path)
+
+
+def test_edit_file_applies_change():
+    """Given file, old content, new content — applies change."""
+    from pathlib import Path
+
+    with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
+        f.write("line1\nline2\nline3\n")
+        f.flush()
+        path = f.name
+
+    result = edit_file(path, "line2\n", "replaced\n")
+
+    content = Path(path).read_text()
+    assert "replaced" in content
+    assert "line2" not in content
+    assert "Applied" in result
 
     os.unlink(path)
