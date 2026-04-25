@@ -193,31 +193,31 @@ class Orchestrator:
         """Parse and execute tool call from response. Returns None if no tool call."""
         import re
 
-        # Match patterns like: run_shell "pwd", run_shell 'pwd', run_shell(pwd)
+        # Match patterns like: run_shell "pwd", run_shell 'pwd', run_shell(pwd), list_dir(".")
         patterns = [
-            r'run_shell\s+["\']([^"\']+)["\']',
-            r'run_shell\s*\(\s*["\']([^"\']+)["\']\s*\)',
-            r'run_shell\(["\']([^"\']+)["\']\)',
+            (r'run_shell\s+["\']([^"\']+)["\']', "run_shell", "command"),
+            (r'run_shell\s*\(\s*["\']([^"\']+)["\']\s*\)', "run_shell", "command"),
+            (r'run_shell\(["\']([^"\']+)["\']\)', "run_shell", "command"),
+            (r'list_dir\s+["\']([^"\']+)["\']', "list_dir", "path"),
+            (r'list_dir\s*\(\s*["\']([^"\']+)["\']\s*\)', "list_dir", "path"),
+            (r'list_dir\(["\']([^"\']+)["\']\)', "list_dir", "path"),
+            (r'list_dir\(([^)]+)\)', "list_dir", "path"),
         ]
 
-        for pattern in patterns:
+        for pattern, tool_name, param in patterns:
             match = re.search(pattern, response)
             if match:
-                command = match.group(1)
-                print(f"Executing: run_shell {command!r}")
+                value = match.group(1)
                 try:
-                    result = await self._tools.execute("run_shell", {"command": command})
-                    print(f"Result: {result!r}")
+                    result = await self._tools.execute(tool_name, {param: value})
                     return result
                 except Exception as e:
-                    print(f"Error: {e}")
                     return f"Error: {e}"
 
         # Fallback: try to extract any shell command
         match = re.search(r'`(pwd|ls|ls -la|cat .+?)`', response)
         if match:
             command = match.group(1)
-            print(f"Fallback executing: {command!r}")
             try:
                 result = await self._tools.execute("run_shell", {"command": command})
                 return result
