@@ -70,12 +70,13 @@ class NoManTUI(App):
             with Horizontal(id="input-area"):
                 yield Input(placeholder="Enter task...", id="input", valid_empty=False)
 
-def on_mount(self) -> None:
+    def on_mount(self) -> None:
+        self.update_status()
         self.query_one("#input", Input).focus()
         # Log available tools on startup
         if self._orchestrator:
             tools = self._orchestrator.tool_bus.list_tools()
-print(f"[LOG] Loaded {len(tools)} tools: {', '.join(tools[:10])}{'...' if len(tools) > 10 else ''}")
+            print(f"[LOG] Loaded {len(tools)} tools: {', '.join(tools[:10])}{'...' if len(tools) > 10 else ''}")
 
     def on_key(self, event: Key) -> None:
         if event.key == "enter":
@@ -225,27 +226,9 @@ print(f"[LOG] Loaded {len(tools)} tools: {', '.join(tools[:10])}{'...' if len(to
             return []
 
     def write_history(self, text: str) -> None:
-        session_dir = Path.home() / ".noman" / "session"
-        session_dir.mkdir(exist_ok=True)
-        
-        # Save to session file with timestamp
-        from datetime import datetime
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        session_file = session_dir / f"{timestamp}.md"
-        
-        # Build session content - append if exists
-        prev = session_file.read_text() if session_file.exists() else ""
-        
-        content = f"# Session {session_dir.glob('*.md').__len__() + 1}\n\n"
-        content += f"**Time:** {datetime.now().isoformat()}\n\n"
-        content += "---\n\n"
-        
-        if prev:
-            content = prev.rstrip() + f"\n> {text}\n"
-        else:
-            content += f"> {text}\n"
-        
-        session_file.write_text(content + "\n")
+        history_file = Path.home() / ".noman" / "history.txt"
+        history_file.parent.mkdir(exist_ok=True)
+        history_file.open("a").write(text + "\n")
 
     async def run_task(self, task: str) -> None:
         self._metrics.state = TUIState.INITIALIZING
