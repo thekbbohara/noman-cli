@@ -114,3 +114,42 @@ def test_edit_file_applies_change():
     assert "Applied" in result
 
     os.unlink(path)
+
+
+def test_edit_file_rejects_multiple_occurrences():
+    """edit_file should reject when old_content appears multiple times."""
+    from pathlib import Path
+
+    with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:
+        f.write("line2\nline2\nline2\n")
+        f.flush()
+        path = f.name
+
+    result = edit_file(path, "line2\n", "replaced\n")
+
+    content = Path(path).read_text()
+    assert "Found 3 occurrences" in result
+    assert "line2" in content
+
+    os.unlink(path)
+
+
+def test_find_definition_returns_location():
+    """Find where a symbol is defined."""
+    from core.tools import find_definition
+    result = find_definition("write_file")
+    assert "def write_file" in result
+
+
+def test_find_references_returns_files():
+    """Find files that reference a symbol."""
+    from core.tools import find_references
+    result = find_references("diff_preview")
+    assert isinstance(result, list)
+
+
+def test_search_symbols_finds_by_name():
+    """Search for symbols matching query."""
+    from core.tools import search_symbols
+    result = search_symbols("diff")
+    assert "diff_preview" in result

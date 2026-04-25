@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -359,8 +360,11 @@ def edit_file(path: str, old_content: str, new_content: str) -> str:
         return f"File not found: {path}"
 
     current = p.read_text()
-    if old_content not in current:
+    count = current.count(old_content)
+    if count == 0:
         return f"Old content not found in {path}"
+    if count > 1:
+        return f"Found {count} occurrences - use replace_all for multiple replacements"
 
     updated = current.replace(old_content, new_content)
     p.write_text(updated)
@@ -583,13 +587,47 @@ def find_symbol(query: str, path: str = ".") -> str:
     return "\n".join(results) if results else f"No symbols matching '{query}'"
 
 
-def find_references(symbol: str, path: str = ".") -> str:
-    result = subprocess.run(
-        ["grep", "-rn", symbol, path,
-         "--include=*.py", "--include=*.ts", "--include=*.js"],
-        capture_output=True, text=True,
-    )
-    return result.stdout or f"No references to '{symbol}'"
+def find_definition(symbol: str) -> str:
+    """Find where a symbol is defined. Searches for def/class/const patterns."""
+    pattern = rf"^(def|class|const|async def)\s+{re.escape(symbol)}\s*[\(=]"
+    matches = []
+    for py_file in Path(".").rglob("*.py"):
+        try:
+            content = py_file.read_text()
+            for i, line in enumerate(content.splitlines(), 1):
+                if re.search(pattern, line):
+                    matches.append(f"{py_file}:{i}: {line.strip()}")
+        except Exception:
+            continue
+    return "\n".join(matches) if matches else f"Symbol '{symbol}' not found"
+
+
+def find_references(symbol: str) -> list[str]:
+    """Find files that reference a symbol."""
+    pattern = rf"\b{re.escape(symbol)}\b"
+    files = []
+    for py_file in Path(".").rglob("*.py"):
+        try:
+            if pattern in py_file.read_text():
+                files.append(str(py_file))
+        except Exception:
+            continue
+    return files
+
+
+def search_symbols(query: str) -> str:
+    """Search for symbols by name pattern."""
+    pattern = rf"^(def|class|async def)\s+{re.escape(query)}"
+    matches = []
+    for py_file in Path(".").rglob("*.py"):
+        try:
+            content = py_file.read_text()
+            for i, line in enumerate(content.splitlines(), 1):
+                if re.search(pattern, line, re.IGNORECASE):
+                    matches.append(f"{py_file}:{i}: {line.strip()}")
+        except Exception:
+            continue
+    return "\n".join(matches) if matches else f"No symbols matching '{query}'"
 
 
 def get_file_tree(path: str = ".", max_depth: int = 3) -> str:
