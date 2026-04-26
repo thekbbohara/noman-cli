@@ -172,17 +172,11 @@ class NoManTUI(App):
     def action_expand(self) -> None:
         self._expanded = not self._expanded
         output = self.query_one("#output", TrackedRichLog)
-        output.clear()
-
+        # Don't clear, just toggle wrap mode for long content
         if self._expanded:
-            for line in self._last_result_full.split("\n"):
-                output.write(line)
+            output.wrap = True
         else:
-            lines = self._convert_markdown_to_textual(self._last_result_full)
-            for line in lines[:5]:
-                output.write(line)
-            if len(lines) > 5:
-                output.write("[i]... (Ctrl+E for full)[/i]")
+            output.wrap = True  # always wrap for readability
 
     def action_diff_view(self) -> None:
         output = self.query_one("#output", TrackedRichLog)
@@ -293,8 +287,8 @@ class NoManTUI(App):
             self.call_next(self.hide_input)
 
             output = self.query_one("#output", TrackedRichLog)
-            output.clear()
-            output.write(f"[b]❯[/b] {task}")
+            # Append task prompt instead of clearing — keeps full session history
+            output.write(f"\n[b]❯ {task}[/b]\n")
 
             self._metrics.state = TUIState.RUNNING
             self.call_next(self.update_status)
@@ -303,13 +297,12 @@ class NoManTUI(App):
                 result = await self._orchestrator.run(task)
                 self._last_result_full = result
                 self._last_task = task
-                self._expanded = False
 
+                # Show full response — no truncation
                 lines = self._convert_markdown_to_textual(result)
-                for line in lines[:5]:
+                for line in lines:
                     output.write(line)
-                if len(lines) > 5:
-                    output.write("[i]... (Ctrl+E to expand)[/i]")
+                output.write("\n")
 
                 self.write_history(f"❯ {task}\n{result}")
                 self._metrics.state = TUIState.COMPLETE
@@ -322,7 +315,6 @@ class NoManTUI(App):
             output.write(f"[red]Crash: {e}[/red]")
             output.write(f"[dim]{traceback.format_exc()}[/dim]")
             self._metrics.state = TUIState.ERROR
-
         finally:
             self._metrics.turn_count += 1
             self.call_next(self.update_status)
