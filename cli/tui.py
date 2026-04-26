@@ -223,7 +223,6 @@ class NoManTUI(App):
         self._filtered_commands = commands
         self._selected_index = 0
         if commands:
-            table.focus()
             from textual.coordinate import Coordinate
             table.cursor_coordinate = Coordinate(0, 0)
 
@@ -269,6 +268,39 @@ class NoManTUI(App):
                     self._execute_command(cmd)
             except (ValueError, TypeError):
                 pass
+
+    def on_input_key(self, event: Key) -> None:
+        """Handle arrow keys on the input while palette is open."""
+        if not self._command_palette_open:
+            return
+        if event.key == "arrow_down":
+            if self._filtered_commands:
+                new_idx = min(self._selected_index + 1, len(self._filtered_commands) - 1)
+                self._selected_index = new_idx
+                table = self.query_one("#command-table", DataTable)
+                from textual.coordinate import Coordinate
+                table.cursor_coordinate = Coordinate(new_idx, 0)
+                event.stop()
+                return
+        if event.key == "arrow_up":
+            if self._filtered_commands:
+                new_idx = max(self._selected_index - 1, 0)
+                self._selected_index = new_idx
+                table = self.query_one("#command-table", DataTable)
+                from textual.coordinate import Coordinate
+                table.cursor_coordinate = Coordinate(new_idx, 0)
+                event.stop()
+                return
+        if event.key == "enter":
+            if self._filtered_commands and self._selected_index < len(self._filtered_commands):
+                cmd = self._filtered_commands[self._selected_index]["value"]
+                self._execute_command(cmd)
+                event.stop()
+                return
+        if event.key == "escape":
+            self._hide_command_palette()
+            event.stop()
+            return
 
     def on_key(self, event: Key) -> None:
         """Handle keyboard events for palette navigation."""
