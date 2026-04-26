@@ -724,14 +724,85 @@ def skill_list() -> str:
         mem.close()
 
 
+def skill_match(task: str, max_results: int = 5) -> str:
+    """Find the most relevant skills for a task using BM25 + semantic matching."""
+    from core.selfimprove.skill_loader import get_skill_loader
+    loader = get_skill_loader()
+    candidates = loader.match_skills(task, max_results=max_results)
+    return loader.format_match_results(candidates)
+
+
 def skill_load(name: str) -> str:
-    from core.memory import MemorySystem
-    mem = MemorySystem()
-    try:
-        content = mem.get_skill(name)
-        return content if content else f"Skill '{name}' not found"
-    finally:
-        mem.close()
+    """Load a skill into context (with dependency resolution + budget check)."""
+    from core.selfimprove.skill_loader import get_skill_loader
+    loader = get_skill_loader()
+    return loader.load_skill_by_name(name)
+
+
+def skill_load_all(task: str = "", max_skills: int = 3, max_tokens: int = 4000) -> str:
+    """Auto-load the most relevant skills for the current task."""
+    from core.selfimprove.skill_loader import get_skill_loader
+    loader = get_skill_loader()
+    
+    if not task:
+        skills_list_result = skill_list()
+        return (
+            f"=== Available Skills ===\n{skills_list_result}\n\n"
+            f"Use skill_match(task) to find relevant skills.\n"
+            f"Use skill_load(name) to load a specific skill."
+        )
+    
+    result = loader.load_all_relevant(task, max_skills=max_skills, max_tokens=max_tokens)
+    
+    lines = []
+    if result.auto_loaded:
+        lines.append(f"Auto-loaded {len(result.auto_loaded)} skill(s):")
+        for sid in result.auto_loaded:
+            lines.append(f"  ✓ {sid}")
+    if result.skipped_low_relevance:
+        lines.append(f"\nSkipped (low relevance): {', '.join(result.skipped_low_relevance)}")
+    if result.skipped_budget:
+        lines.append(f"\nSkipped (budget): {', '.join(result.skipped_budget)}")
+    if result.errors:
+        lines.append(f"\nErrors:")
+        for err in result.errors:
+            lines.append(f"  ✗ {err}")
+    if not result.auto_loaded and not result.errors:
+        lines.append("No skills loaded.")
+    
+    lines.append(f"\nToken usage: {result.token_usage} / {loader.budget}")
+    return "\n".join(lines)
+
+
+def skill_stats() -> str:
+    """Show skill usage statistics."""
+    from core.selfimprove.skill_metadata import SkillMetadataStore
+    store = SkillMetadataStore()
+    
+    lines = ["=== Skill Usage Statistics ==="]
+    
+    from core.selfimprove.skill_loader import get_skill_loader
+    loader = get_skill_loader()
+    all_skills = loader.index.get_all_ids()
+    
+    loaded_skills = []
+    for sid in all_skills:
+        meta = store.get(sid)
+        if meta.loaded_count > 0:
+            loaded_skills.append((sid, meta))
+    
+    if not loaded_skills:
+        return "No skill usage data available."
+    
+    loaded_skills.sort(key=lambda x: x[1].effectiveness_score, reverse=True)
+    
+    for sid, meta in loaded_skills[:20]:
+        bar_len = int(meta.effectiveness_score * 20)
+        bar = "█" * bar_len + "░" * (20 - bar_len)
+        lines.append(f"  {sid:<35} [{bar}] {meta.effectiveness_score:.2f} "
+                     f"(loaded: {meta.loaded_count}, discarded: {meta.discarded_count})")
+    
+    return "\n".join(lines)
 
 
 # ── ToolBus factory ────────────────────────────────────────────────────────────
@@ -773,8 +844,11 @@ def create_toolbus(cwd: str | Path = ".") -> ToolBus:
         Tool("get_file_tree", "Show directory tree view", SCHEMA_TREE, get_file_tree, 150),
         Tool("list_imports", "List all imports in a file", SCHEMA_PATH, list_imports, 100),
         Tool("memory_search", "Search the memory store", SCHEMA_MEM_SEARCH, memory_search, 100),
-        Tool("skill_list", "List available procedural skills", SCHEMA_EMPTY, skill_list, 50),
-        Tool("skill_load", "Load a procedural skill into context", SCHEMA_SKILL, skill_load, 200),
+        Tool("skill_list", "List available procedural skills (deprecated, use skill_match)", SCHEMA_EMPTY, skill_list, 50),
+        Tool("skill_match", "Find most relevant skills for a task using BM25 + semantic matching", "task: str, max_results: int = 5", skill_match, 100),
+        Tool("skill_load", "Load a skill into context with dependency resolution + budget check", "name: str", skill_load, 200),
+        Tool("skill_load_all", "Auto-load the most relevant skills for the current task", "task: str = '', max_skills: int = 3, max_tokens: int = 4000", skill_load_all, 100),
+        Tool("skill_stats", "Show skill usage statistics with effectiveness scores", "", skill_stats, 50),
         Tool("diff_preview", "Show diff between current and new file content", SCHEMA_PREVIEW, diff_preview, 50),
         Tool("edit_file", "Edit content in a file", SCHEMA_EDIT, edit_file, 100),
         Tool("find_definition", "Find where a symbol is defined", SCHEMA_FIND_SYM, find_definition, 50),

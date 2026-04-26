@@ -633,6 +633,42 @@ def _cmd_skill_discard(draft_id: str) -> int:
     return 0 if success else 1
 
 
+def _cmd_skill_patterns(min_occurrences: int = 3) -> int:
+    """Detect recurring patterns across recent sessions."""
+    from core.selfimprove.cross_session import detect_cross_session_patterns, format_patterns
+    patterns = detect_cross_session_patterns(min_occurrences=min_occurrences)
+    print(format_patterns(patterns))
+    return 0
+
+
+def _cmd_skill_stats() -> int:
+    """Show skill creation statistics, including domain-level approval rates."""
+    from core.selfimprove.skill_queue import SkillQueue
+    queue = SkillQueue()
+    stats = queue.get_usage_stats()
+    domain_stats = stats.pop("domain_stats", {})
+
+    print("=== Skill Creation Statistics ===\n")
+    print(f"  Total drafts:     {stats['total']}")
+    print(f"  Pending:          {stats['pending']}")
+    print(f"  Approved:         {stats['approved']}")
+    print(f"  Discarded:        {stats['discarded']}")
+    print(f"  Expired:          {stats['expired']}")
+
+    if domain_stats:
+        print(f"\n  === Domain Approval Rates ===")
+        for domain, data in sorted(domain_stats.items()):
+            total = data["approved"] + data["discarded"]
+            rate = data["approved"] / total if total > 0 else 0.0
+            threshold = queue.get_recommended_threshold(domain)
+            bar = "#" * int(rate * 20) + "." * (20 - int(rate * 20))
+            print(f"    {domain:<25} {rate:.0%} [{bar}] (threshold: {threshold:.2f})")
+            print(f"      approved: {data['approved']}, discarded: {data['discarded']}")
+    else:
+        print("\n  No domain statistics yet. Data will appear after skill reviews.")
+    return 0
+
+
 def _cmd_stats(noman_dir: Path | None = None) -> int:
     """Show execution stats."""
     if noman_dir is None:
@@ -976,6 +1012,11 @@ def main(argv=None):
                 print("Usage: noman skill discard <draft_id>")
                 return 1
             return _cmd_skill_discard(draft_id)
+        elif subcmd == "patterns":
+            min_occ = getattr(args, 'min_occurrences', 3)
+            return _cmd_skill_patterns(min_occurrences=min_occ)
+        elif subcmd == "stats":
+            return _cmd_skill_stats()
         return 1
 
     if args.command == "stats":

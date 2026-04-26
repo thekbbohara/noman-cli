@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from dataclasses import dataclass, field
 from enum import StrEnum
+from pathlib import Path
 from typing import Any
+from collections import Counter
 
 from core.errors import SelfModificationError
 from core.selfimprove.critic import TraceCritic, TraceScore
@@ -94,6 +97,72 @@ class ImprovementResult:
             "total_proposals": len(self.proposals),
             "violations_count": len(self.guardrail_violations),
         }
+
+
+# ------------------------------------------------------------------
+# BM25-lite: simple token-based text similarity for skill name inference
+# ------------------------------------------------------------------
+
+def _tokenize(text: str) -> set[str]:
+    """Simple tokenizer: lowercase, split on non-alphanumeric."""
+    return set(re.findall(r'[a-z0-9_]+', text.lower()))
+
+
+def _bm25_score(query_tokens: set[str], doc_text: str, k1: float = 1.5, b: float = 0.75) -> float:
+    """Simple BM25-like scoring for a single query against a document string."""
+    doc_tokens = _tokenize(doc_text)
+    if not doc_tokens or not query_tokens:
+        return 0.0
+
+    doc_len = len(doc_tokens)
+    idf_cache: dict[str, float] = {}
+
+    score = 0.0
+    for token in query_tokens:
+        # IDF: 1 if term never seen (sparse), else log(1 + freq/doc_count)
+        if token not in idf_cache:
+            tf = 1 if token in doc_tokens else 0
+            idf_cache[token] = 1.0 + (1.0 / (tf + 1))
+
+        # TF-IDF with BM25 normalization
+        tf = 1  # token appears once in query
+        numerator = tf * (k1 + 1)
+        denominator = tf + k1 * (1 - b + b * doc_len / 100)
+        score += idf_cache[token] * numerator / denominator
+
+    return score
+
+
+def _search_existing_skills(query: str, max_results: int = 5) -> list[tuple[str, str, float]]:
+    """Search existing skills on disk for the best name match.
+
+    Returns list of (skill_name, description, score) sorted by relevance.
+    Uses BM25-lite scoring against skill names and descriptions.
+    """
+    skill_dir = Path.home() / ".hermes/skills"
+    if not skill_dir.exists():
+        return []
+
+    query_tokens = _tokenize(query)
+    results = []
+
+    for item in sorted(skill_dir.iterdir()):
+        if not item.is_dir() or item.name.startswith("."):
+            continue
+        skill_file = item / "SKILL.md"
+        if not skill_file.exists():
+            continue
+
+        content = skill_file.read_text()[:500]
+        # Score against name and description
+        name_score = _bm25_score(query_tokens, item.name)
+        desc_score = _bm25_score(query_tokens, content)
+        total_score = name_score * 1.5 + desc_score  # Name match weighted higher
+        if total_score > 0.1:
+            results.append((item.name, content[:100], total_score))
+
+    results.sort(key=lambda x: x[2], reverse=True)
+    return results[:max_results]
 
 
 class MetaAgent:
@@ -214,15 +283,15 @@ class MetaAgent:
         """Generate improvement proposals based on a TraceScore."""
         proposals: list[ImprovementProposal] = []
 
-        # Low efficiency → optimization proposals.
+        # Low efficiency -> optimization proposals.
         if score.efficiency < 70:
             proposals.append(self._propose_optimization_generic(score))
 
-        # Low correctness → bug-fix proposals.
+        # Low correctness -> bug-fix proposals.
         if score.correctness < 60:
             proposals.append(self._propose_correctness(score))
 
-        # High cost → token optimization.
+        # High cost -> token optimization.
         if score.cost < 60:
             proposals.append(self._propose_cost_reduction(score))
 
@@ -383,71 +452,305 @@ class MetaAgent:
 
         return proposals
 
+    # ------------------------------------------------------------------
+    # SKILL CREATION — improved version
+    # ------------------------------------------------------------------
+
     def _propose_skill_creation(self, trace: dict[str, Any], score: TraceScore) -> str | None:
         """
         Propose a skill creation as a draft in the skill queue.
 
-        Returns draft_id if created, None if skipped (duplicate or score too low).
+        Uses domain-aware thresholds: domains with high approval rates
+        use lower thresholds (more permissive), while low-rate domains
+        use higher thresholds (more conservative).
+
+        Returns draft_id if created, None if skipped (duplicate, low score, or rate-limited).
         """
         from core.selfimprove.skill_queue import SkillQueue
 
         # Skip if score is below threshold
-        if score.skill_suggestion_score < 0.7:
+        queue = SkillQueue()
+        recommended_threshold = queue.get_recommended_threshold(score.detected_domain)
+
+        if score.skill_suggestion_score < recommended_threshold:
             return None
 
-        # Generate skill name from trace
-        skill_name = self._infer_skill_name(trace)
+        # Rate limit: max 2 skill drafts per session
+        pending = queue.list_pending()
+        if len(pending) >= 2:
+            logger.info("Rate limited: %d pending drafts, skipping new skill proposal", len(pending))
+            return None
 
-        # Check against existing skills to avoid duplicates
-        queue = SkillQueue()
-        for existing in queue.list_pending():
-            if existing.name == skill_name:
-                logger.info("Skipping duplicate skill draft: %s", skill_name)
-                return None
+        # Generate skill name and content — use improved inference
+        skill_name = self._infer_skill_name(trace, score)
+        if not skill_name:
+            return None
 
-        # Extract steps from trace
+        # Extract rich trace analysis
         steps = self._extract_steps_from_trace(trace)
         pitfalls = self._extract_pitfalls_from_trace(trace)
+        corrections = self._extract_corrections_from_trace(trace)
+        approach = self._extract_approach_from_trace(trace)
+        conditions = self._extract_trigger_conditions(trace)
 
-        # Generate SKILL.md content
-        content = self._generate_skill_md(skill_name, steps, pitfalls, score)
+        # Generate enriched SKILL.md content
+        content = self._generate_skill_md(skill_name, steps, pitfalls, corrections, score, approach, conditions)
 
-        # Add to queue as draft
-        queue.add_draft(
+        # Add to queue as draft (duplicate check happens in add_draft)
+        draft_id = queue.add_draft(
             name=skill_name,
-            description=f"Auto-detected from trace (score: {score.skill_suggestion_score:.2f})",
+            description=f"Auto-detected from {score.detected_domain} trace (score: {score.skill_suggestion_score:.2f})",
             content=content,
-            trigger_reason=f"Skill worthiness score: {score.skill_suggestion_score:.2f}",
+            trigger_reason=f"Skill worthiness: {score.skill_suggestion_score:.2f} | {score.strengths[:2]}",
             score=score.skill_suggestion_score,
         )
 
-        return f"Draft created for '{skill_name}' (score: {score.skill_suggestion_score:.2f})"
+        if draft_id:
+            logger.info("Skill draft queued: %s — %s", draft_id, skill_name)
+        return draft_id
 
-    def _infer_skill_name(self, trace: dict[str, Any]) -> str:
-        """Infer a skill name from trace context."""
+    def _infer_skill_name(self, trace: dict[str, Any], score: TraceScore) -> str | None:
+        """Infer a skill name from trace context using multiple heuristics.
+
+        Priority:
+        1. BM25 search against existing skills (best match + suffix)
+        2. User message keywords (most reliable)
+        3. Correction text (what the user wanted)
+        4. Turn result keywords (task description)
+        5. Tool call patterns
+        6. Domain-aware fallback
+
+        Returns None if no reasonable name can be inferred.
+        """
         turns = trace.get("turns", [])
-        # Look for task descriptions or tool names that indicate the skill's purpose
+        user_messages = trace.get("user_messages", [])
+        tool_calls = trace.get("tool_calls", [])
+        domain = score.detected_domain
+
+        # Strategy 1: BM25 search against existing skills
+        # Build a query from trace context
+        query_parts = []
+        for msg in user_messages:
+            if isinstance(msg, str) and len(msg) > 10:
+                query_parts.append(msg)
         for turn in turns:
             if isinstance(turn, dict):
                 result = turn.get("result", "")
                 if isinstance(result, str) and len(result) > 10:
-                    # Extract first meaningful phrase
-                    words = result.split()[:5]
-                    name = "_".join(w.lower().strip(".,!?") for w in words if w.isalnum())
-                    if len(name) > 5:
-                        return f"skill_{name}"
-        return f"skill_trace_{len(turns)}steps"
+                    query_parts.append(result)
+
+        if query_parts:
+            query = " ".join(query_parts)[:500]
+            matches = _search_existing_skills(query)
+            if matches:
+                best_name, best_desc, best_score = matches[0]
+                # Check if the best match is a good fit (high enough score)
+                if best_score > 2.0:
+                    # Check if adding a suffix makes it more specific
+                    # Extract last meaningful word from query
+                    words = _tokenize(query)
+                    long_words = [w for w in words if len(w) > 4 and w.isalpha()]
+                    if long_words:
+                        last_word = long_words[-1]
+                        candidate = f"skill_{best_name}_{last_word}"
+                        # Check this candidate doesn't already exist
+                        candidate_path = Path.home() / ".hermes/skills" / candidate
+                        if not candidate_path.exists():
+                            return candidate
+                    return f"skill_{best_name}"
+
+        # Strategy 2: Extract from user messages (most reliable indicator of intent)
+        for msg in user_messages:
+            if isinstance(msg, str) and len(msg) > 10:
+                words = _tokenize(msg.lower())
+                # Prefer longer, meaningful words
+                meaningful = [w for w in words if len(w) > 4 and w.isalpha()]
+                if meaningful:
+                    # Pick the most "actionable" word (last meaningful one)
+                    return f"skill_{meaningful[-1]}"
+
+        # Strategy 3: Extract from correction text
+        for turn in turns:
+            if isinstance(turn, dict):
+                result = turn.get("result", "")
+                if isinstance(result, str):
+                    lower = result.lower()
+                    if any(w in lower for w in ["fix", "change", "instead", "try", "note", "actually"]):
+                        words = _tokenize(lower)
+                        meaningful = [w for w in words if len(w) > 3 and w.isalpha()]
+                        if meaningful:
+                            return f"skill_{meaningful[-1]}"
+
+        # Strategy 4: Extract from tool call patterns
+        tool_names = []
+        for tc in tool_calls:
+            if isinstance(tc, dict):
+                name = tc.get("tool", tc.get("name", ""))
+                if name:
+                    tool_names.append(name)
+        if tool_names:
+            counts = Counter(tool_names)
+            unique_tools = [t for t, c in counts.items() if c == 1]
+            if unique_tools:
+                name = unique_tools[0].replace("-", "_").replace(" ", "_")
+                if len(name) > 5:
+                    return f"skill_{name}"
+            first = tool_names[0].replace("-", "_").replace(" ", "_")
+            return f"skill_{first}"
+
+        # Strategy 5: Domain-aware fallback
+        domain_names = {
+            "browser_automation": "browser-automation",
+            "code_refactoring": "code-refactoring",
+            "database": "database-query",
+            "web_research": "web-research",
+            "mcp_integration": "mcp-integration",
+            "skill_creation": "skill-management",
+            "communication": "cross-platform-communication",
+            "testing": "test-automation",
+            "git_operations": "git-workflow",
+            "devops": "devops-automation",
+            "file_operations": "file-operations",
+        }
+        fallback = domain_names.get(domain, "general-task")
+        return f"skill-{fallback}"
+
+    def _extract_approach_from_trace(self, trace: dict[str, Any]) -> list[str]:
+        """Extract the *approach* taken in the trace — not just tool calls but the pattern.
+
+        Analyzes the trace to understand the methodology, not just the mechanics.
+        Returns a list of approach descriptions.
+        """
+        turns = trace.get("turns", [])
+        errors = trace.get("errors", [])
+        corrections = self._extract_corrections_from_trace(trace)
+
+        approach = []
+
+        # Detect approach patterns
+        tool_types = set()
+        for t in turns:
+            if isinstance(t, dict):
+                tool = t.get("tool", "")
+                if "browser" in tool.lower():
+                    tool_types.add("browser_interaction")
+                elif "terminal" in tool.lower():
+                    tool_types.add("shell_command")
+                elif "file" in tool.lower() or "patch" in tool.lower():
+                    tool_types.add("file_modification")
+                elif "search" in tool.lower():
+                    tool_types.add("information_retrieval")
+                elif "query" in tool.lower() or "mysql" in tool.lower():
+                    tool_types.add("database_operation")
+                elif "mcp" in tool.lower():
+                    tool_types.add("mcp_integration")
+
+        if tool_types:
+            approach.append(f"Approach: Multi-step workflow using {', '.join(sorted(tool_types))}")
+
+        # Did we recover from errors?
+        if errors:
+            approach.append(f"Recovered from {len(errors)} error(s) during execution")
+
+        # Did we follow user corrections?
+        if corrections:
+            approach.append(f"Incorporated {len(corrections)} user correction(s) to refine approach")
+
+        # Did we need to iterate?
+        if len(turns) > 3:
+            approach.append(f"Required {len(turns)} steps to reach solution (iterative refinement)")
+
+        if not approach:
+            approach.append("Standard single-pass approach")
+
+        return approach
+
+    def _extract_trigger_conditions(self, trace: dict[str, Any]) -> list[str]:
+        """Extract conditions under which this pattern should be triggered.
+
+        Analyzes the trace to identify the *when* and *why* this skill applies.
+        """
+        turns = trace.get("turns", [])
+        tool_calls = trace.get("tool_calls", [])
+        errors = trace.get("errors", [])
+
+        conditions = []
+
+        # What tools were used? -> when to trigger
+        tool_names = set()
+        for tc in tool_calls:
+            if isinstance(tc, dict):
+                name = tc.get("tool", "")
+                if name:
+                    tool_names.add(name)
+
+        if tool_names:
+            conditions.append(f"Trigger: When using tools [{', '.join(sorted(tool_names))}]")
+
+        # Were there errors that needed handling?
+        error_messages = [e.get("message", str(e)) for e in errors if isinstance(e, dict)]
+        if error_messages:
+            conditions.append(f"Need to handle: {'; '.join(error_messages[:3])}")
+
+        # Was there a specific user request?
+        user_messages = trace.get("user_messages", [])
+        for msg in user_messages:
+            if isinstance(msg, str) and len(msg) > 10:
+                conditions.append(f"Context: {msg[:80]}")
+                break
+
+        if not conditions:
+            conditions.append("Trigger: When facing similar tool call patterns")
+
+        return conditions
 
     def _extract_steps_from_trace(self, trace: dict[str, Any]) -> list[str]:
-        """Extract key steps from trace tool calls."""
-        steps = []
+        """Extract key steps from trace tool calls.
+
+        Improved version: groups related tool calls and describes the *intent*
+        of each step, not just the raw tool name.
+        """
         tool_calls = trace.get("tool_calls", [])
-        for i, tc in enumerate(tool_calls[:10]):  # Limit to first 10
-            if isinstance(tc, dict):
-                tool = tc.get("tool", tc.get("name", "unknown"))
-                args = tc.get("args", {})
-                arg_str = ", ".join(f"{k}={v}" for k, v in list(args.items())[:3])
-                steps.append(f"Call {tool}({arg_str})")
+        turns = trace.get("turns", [])
+
+        steps = []
+        seen_tools = set()
+
+        for i, tc in enumerate(tool_calls[:15]):
+            if not isinstance(tc, dict):
+                continue
+            tool = tc.get("tool", tc.get("name", "unknown"))
+            args = tc.get("args", {})
+
+            # Group consecutive calls to the same tool
+            if tool in seen_tools and len(seen_tools) > 3:
+                # Skip duplicates if we already have enough steps
+                continue
+
+            # Format args meaningfully
+            arg_parts = []
+            for k, v in list(args.items())[:3]:
+                val_str = str(v)
+                if len(val_str) > 50:
+                    val_str = val_str[:50] + "..."
+                arg_parts.append(f"{k}={val_str}")
+
+            step_text = f"Call {tool}({', '.join(arg_parts)})"
+
+            # Add context from turn result
+            if i < len(turns) and isinstance(turns[i], dict):
+                result = turns[i].get("result", "")
+                if isinstance(result, str) and result.strip() and result not in ("", "None"):
+                    # If result indicates success, summarize it
+                    result_lower = result.lower()
+                    if not any(w in result_lower for w in ["error", "failed", "exception"]):
+                        # Summarize the result
+                        summary = result[:80]
+                        step_text += f" -> {summary}"
+
+            steps.append(step_text)
+            seen_tools.add(tool)
+
         return steps if steps else ["Multiple tool calls executed"]
 
     def _extract_pitfalls_from_trace(self, trace: dict[str, Any]) -> list[str]:
@@ -460,32 +763,69 @@ class MetaAgent:
                 pitfalls.append(f"- {msg}")
         return pitfalls if pitfalls else ["None detected"]
 
+    def _extract_corrections_from_trace(self, trace: dict[str, Any]) -> list[str]:
+        """Extract user corrections from trace."""
+        corrections = []
+        user_messages = trace.get("user_messages", [])
+        for msg in user_messages:
+            if isinstance(msg, str):
+                lower = msg.lower()
+                if any(w in lower for w in ["don't", "instead", "try", "fix", "change", "actually", "wait"]):
+                    if len(msg) > 10:
+                        corrections.append(msg[:100])
+        return corrections[:5]
+
     def _generate_skill_md(
         self,
         name: str,
         steps: list[str],
         pitfalls: list[str],
+        corrections: list[str],
         score: TraceScore,
+        approach: list[str],
+        conditions: list[str],
     ) -> str:
-        """Generate SKILL.md content from trace data."""
+        """Generate enriched SKILL.md content from trace data.
+
+        Produces a well-structured skill document with:
+        - Clear trigger conditions
+        - Step-by-step approach
+        - Known pitfalls and corrections
+        - Domain context
+        """
+        corrections_section = ""
+        if corrections:
+            corrections_section = "## Corrections\n\nThe user corrected the agent on these points:\n\n" + "\n".join(
+                f"- {c}" for c in corrections
+            ) + "\n"
+
+        conditions_section = "## When to Use\n\n" + "\n".join(f"- {c}" for c in conditions) + "\n"
+
+        approach_section = "## Approach\n\n" + "\n".join(f"- {a}" for a in approach) + "\n"
+
         return f"""---
 name: {name}
-description: Auto-detected skill (score: {score.skill_suggestion_score:.2f})
+description: Auto-detected skill ({score.detected_domain}, score: {score.skill_suggestion_score:.2f})
 ---
+
 # {name.replace('skill_', '').title().replace('_', ' ')}
 
 ## Trigger
-Auto-detected from trace analysis — load when facing similar patterns.
+Auto-detected from {score.detected_domain} trace analysis. Load when facing similar patterns.
 
-## Steps
+## Conditions
+{conditions_section}## Approach
+{approach_section}## Steps
 {chr(10).join(f'{i+1}. {step}' for i, step in enumerate(steps))}
 
 ## Pitfalls
 {chr(10).join(pitfalls)}
 
-## Notes
+{corrections_section}## Notes
 - Generated automatically by MetaAgent
 - Review before using — may need refinement
+- Score: {score.skill_suggestion_score:.2f}/1.0
+- Domain: {score.detected_domain}
 """
 
     # ------------------------------------------------------------------

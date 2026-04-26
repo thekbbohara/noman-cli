@@ -85,12 +85,13 @@ def build_subparsers() -> argparse.ArgumentParser:
 
     # -- skill --
     skill = sub.add_parser("skill", help="Skill operations")
-    skill.add_argument("subcmd", choices=["list", "get", "set", "add", "review", "approve", "discard"],
+    skill.add_argument("subcmd", choices=["list", "get", "set", "add", "review", "approve", "discard", "patterns", "stats"],
                        help="Skill subcommand")
     skill.add_argument("name", nargs="?", default=None, help="Skill name")
     skill.add_argument("content", nargs="?", default=None, help="Skill content (for set/add)")
     skill.add_argument("file", nargs="?", default=None, help="Source file (for add)")
     skill.add_argument("draft_id", nargs="?", default=None, help="Draft ID (for approve/discard)")
+    skill.add_argument("--min-occurrences", "-m", type=int, default=3, help="Min occurrences for pattern detection (for 'patterns')")
 
     # -- stats --
     sub.add_parser("stats", help="Show execution stats")
