@@ -204,6 +204,31 @@ class NoManTUI(App):
                 "value": "/exit",
                 "id": "cmd-exit",
             },
+            {
+                "label": "/wiki_init   — Build knowledge graph for this project",
+                "value": "/wiki_init",
+                "id": "cmd-wiki-init",
+            },
+            {
+                "label": "/wiki_summary — Show graph stats",
+                "value": "/wiki_summary",
+                "id": "cmd-wiki-summary",
+            },
+            {
+                "label": "/wiki_list    — List entities",
+                "value": "/wiki_list",
+                "id": "cmd-wiki-list",
+            },
+            {
+                "label": "/wiki_search  — Search wiki pages",
+                "value": "/wiki_search",
+                "id": "cmd-wiki-search",
+            },
+            {
+                "label": "/wiki_lint    — Health check",
+                "value": "/wiki_lint",
+                "id": "cmd-wiki-lint",
+            },
         ]
         if not filter_text:
             return commands
@@ -532,6 +557,20 @@ class NoManTUI(App):
         if task == "/exit":
             self.exit()
             return True
+        if task == "/wiki_init":
+            return self._run_wiki_command("wiki_init", {})
+        if task == "/wiki_summary":
+            return self._run_wiki_command("wiki_graph_summary", {})
+        if task == "/wiki_list":
+            return self._run_wiki_command("wiki_list_entities", {})
+        if task.startswith("/wiki_search"):
+            query = task[len("/wiki_search"):].strip()
+            if not query:
+                self._notify_with_output("Usage: /wiki_search <query>", "warning")
+                return True
+            return self._run_wiki_command("wiki_search_pages", {"query": query})
+        if task == "/wiki_lint":
+            return self._run_wiki_command("wiki_lint", {})
         return False
 
     def _reset_session(self) -> None:
@@ -552,6 +591,55 @@ class NoManTUI(App):
         self._metrics.state = TUIState.IDLE
         self.update_status()
         self.notify("Session reset", severity="information")
+
+    def _run_wiki_command(self, tool_name: str, args: dict) -> bool:
+        """Run a wiki tool command and display the result in the output."""
+        if not self._orchestrator:
+            self.notify("NoMan not initialized yet", severity="warning")
+            return True
+
+        output = self.query_one("#output", TrackedRichLog)
+        output.clear()
+        output.write(f"[dim]# Running /{tool_name}...[/dim]\n")
+
+        # Use the tool bus execute directly (it's async but Textual's event loop handles it)
+        try:
+            import asyncio
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                future = asyncio.ensure_future(
+                    self._orchestrator.tool_bus.execute(tool_name, args),
+                    loop=loop
+                )
+
+                def _on_done(fut):
+                    try:
+                        result = fut.result()
+                        self.call_next(lambda: output.write(f"[bold]Result:[/bold]\n{result}"))
+                    except Exception as e:
+                        self.call_next(lambda: output.write(f"[red]Error: {e}[/red]"))
+                    self.call_next(self.update_status)
+
+                future.add_done_callback(_on_done)
+            else:
+                # No running loop — use asyncio.run in a thread
+                import threading
+                def _run():
+                    result = asyncio.run(self._orchestrator.tool_bus.execute(tool_name, args))
+                    self.call_next(lambda: output.write(f"[bold]Result:[/bold]\n{result}"))
+                    self.call_next(self.update_status)
+                t = threading.Thread(target=_run, daemon=True)
+                t.start()
+        except Exception as e:
+            output.write(f"[red]Error running command: {e}[/red]")
+            self.call_next(self.update_status)
+        return True
+
+    def _notify_with_output(self, message: str, severity: str = "information") -> None:
+        """Show a notification and display the message in the output."""
+        self.notify(message, severity=severity)
+        output = self.query_one("#output", TrackedRichLog)
+        output.write(f"[{severity}]{message}[/{severity}]")
 
     def _convert_markdown_to_textual(self, text: str) -> list:
         """Convert markdown to Rich Text objects."""

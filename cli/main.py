@@ -15,6 +15,7 @@ from core.adapters import create_adapter
 from core.context import ContextManager
 from core.memory import MemorySystem
 from core.orchestrator import Orchestrator, OrchestratorConfig
+from core.wiki import Wiki
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -103,6 +104,72 @@ def _create_orchestrator(args) -> Orchestrator | None:
     # Create memory
     memory = MemorySystem()
 
+    # Create wiki (global + per-project)
+    noman_dir = _get_noman_dir()
+    global_wiki = Wiki(noman_dir / "wiki" / "global")
+    project_wiki_path = Path.cwd() / ".noman" / "wiki"
+    project_wiki = Wiki(project_wiki_path)
+    # Dual-write: ingest to global, query both
+    from core.wiki import Wiki as DualWiki
+    class DualWikiBridge:
+        def __init__(self, global_wiki, project_wiki):
+            self._global = global_wiki
+            self._project = project_wiki
+        @property
+        def graph(self):
+            return self._global.graph
+        def get_entity(self, eid):
+            e = self._global.graph.get_entity(eid)
+            if e: return e
+            return self._project.graph.get_entity(eid)
+        def get_page(self, pid):
+            p = self._global.get_page(pid)
+            if p: return p
+            return self._project.get_page(pid)
+        def upsert_page(self, page):
+            self._global.upsert_page(page)
+            self._project.upsert_page(page)
+        def remove_page(self, pid):
+            self._global.remove_page(pid)
+            self._project.remove_page(pid)
+        def list_entities(self, entity_type=None, scope=None, limit=100):
+            return self._global.graph.list_entities(entity_type, scope, limit)
+        def search_pages(self, query, limit=20):
+            g = self._global.search_pages(query, limit)
+            p = self._project.search_pages(query, limit)
+            seen = set()
+            results = []
+            for pg in g + p:
+                if pg.id not in seen:
+                    seen.add(pg.id)
+                    results.append(pg)
+            return results
+        def list_pages(self, page_type=None, tag=None, limit=50):
+            return self._global.list_pages(page_type, tag, limit)
+        def search_pages(self, query, limit=20):
+            g = self._global.search_pages(query, limit)
+            p = self._project.search_pages(query, limit)
+            seen = set()
+            results = []
+            for pg in g + p:
+                if pg.id not in seen:
+                    seen.add(pg.id)
+                    results.append(pg)
+            return results
+        def get_index(self):
+            return self._global.get_index()
+        def get_log(self, last_n=20):
+            return self._global.get_log(last_n)
+        def log_event(self, event_type, detail, page_id=""):
+            self._global.log_event(event_type, detail, page_id)
+        def lint(self):
+            return self._global.lint()
+        def summary(self):
+            return self._global.graph.summarize()
+        def ingest_source(self, source_id, source_type, content, entities, relations):
+            return self._global.ingest_source(source_id, source_type, content, entities, relations)
+    wiki = DualWikiBridge(global_wiki, project_wiki)
+
     # Create orchestrator
     max_calls = getattr(args, 'max_calls', None)
     config_max_calls = config.get("model", {}).get("max_tool_calls_per_turn", 10)
@@ -112,13 +179,21 @@ def _create_orchestrator(args) -> Orchestrator | None:
         max_tool_calls_per_turn=max_calls if max_calls else config_max_calls,
     )
 
-    return Orchestrator(
+    orch = Orchestrator(
         adapter=adapter,
         tools=tool_bus,
         config=orch_config,
         context=context,
         memory=memory,
+        wiki=wiki,
     )
+
+    # Register wiki tools
+    from core.wiki.tools import register_wiki_tools
+    register_wiki_tools(tool_bus)
+    tool_bus.wiki = wiki
+
+    return orch
 
 
 def _get_noman_dir() -> Path:
@@ -553,6 +628,27 @@ def _cmd_stats(noman_dir: Path | None = None) -> int:
     rollback_dir = noman_dir / "rollbacks"
     rollback_count = sum(1 for _ in rollback_dir.glob("*.json")) if rollback_dir.exists() else 0
 
+    # Wiki stats
+    wiki_path = noman_dir / "wiki" / "global"
+    if wiki_path.exists():
+        try:
+            import json
+            edges_file = wiki_path / "edges.json"
+            if edges_file.exists():
+                edges_data = json.loads(edges_file.read_text())
+                edge_count = len(edges_data)
+            else:
+                edge_count = 0
+            pages_dir = wiki_path / "pages"
+            page_count = sum(1 for _ in pages_dir.glob("*.md")) if pages_dir.exists() else 0
+            wiki_exists = True
+        except Exception:
+            wiki_exists = False
+            edge_count = 0
+            page_count = 0
+    else:
+        wiki_exists = False
+
     print("noman stats")
     print(f"{'=' * 50}")
     print(f"  Turns:                    {turns}")
@@ -562,6 +658,10 @@ def _cmd_stats(noman_dir: Path | None = None) -> int:
     print(f"    - semantic:             {semantic_count}")
     print(f"    - procedural:           {procedural_count}")
     print(f"    - episodic:             {episodic_count}")
+    print(f"  Wiki:                     {'initialized' if wiki_exists else 'not initialized'}")
+    if wiki_exists:
+        print(f"    - entities:             {edge_count} edges")
+        print(f"    - pages:                {page_count}")
     print(f"  Rollbacks:                {rollback_count}")
     print(f"  Config:                   {'exists' if (noman_dir / 'config.toml').exists() else 'not found'}")
     print(f"  Sessions dir:             {'exists' if (noman_dir / 'sessions').exists() else 'not found'}")

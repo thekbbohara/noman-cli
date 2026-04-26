@@ -71,11 +71,11 @@ Explicitly out of scope to maintain focus:
      │     Orchestrator        │  ← ReAct loop + budget guard + turn management
      └─┬──────┬──────┬──────┬──┘
        │      │      │      │
-   ┌───▼──┐ ┌─▼──┐ ┌─▼───┐ ┌▼──────┐
-   │ A.   │ │ B. │ │ C.  │ │ Tool  │
-   │Ctx   │ │Mem │ │Self │ │Bus    │
-   │Mgmt  │ │    │ │Impr │ │       │
-   └──────┘ └────┘ └─────┘ └───────┘
+   ┌───▼──┐ ┌─▼──┐ ┌─▼───┐ ┌──▼───┐ ┌▼──────┐
+   │ A.   │ │ B. │ │ C.  │ │ D.   │ │ Tool  │
+   │Ctx   │ │Mem │ │Self │ │Wiki  │ │Bus    │
+   │Mgmt  │ │    │ │Impr │ │(Graph)│ │       │
+   └──────┘ └────┘ └─────┘ └──────┘ └───────┘
        │      │      │        │
        └──────┴──────┴────────┘
                   │
@@ -643,7 +643,113 @@ Because the agent can rewrite its own prompts and generate tools, three guardrai
 
 ---
 
-## 8. The Conflict-Free Update Flow
+## 8. Subsystem D — Knowledge Graph / Wiki
+
+The wiki is a **compounding knowledge layer** that sits between raw memory and the agent's reasoning. Unlike the key-value memory system (which stores isolated facts), the wiki maintains a structured graph of entities and cross-references that grows richer with every conversation.
+
+### D.1 Three-Layer Pattern
+
+```
+┌─────────────────────────────────────────┐
+│ Raw Sources (immutable)                 │  ← conversations, files, articles
+│   .noman/wiki/sources/                  │
+└────────────────────┬────────────────────┘
+                     │ ingest
+┌────────────────────▼────────────────────┐
+│ Wiki (LLM-generated markdown)           │  ← entity pages, concept pages, summaries
+│   .noman/wiki/global/pages/             │  ← cross-referenced, interlinked
+│   .noman/wiki/<project>/pages/          │  ← per-project scope
+│   .noman/wiki/global/index.json         │  ← content-oriented catalog
+│   .noman/wiki/global/log.md             │  ← chronological event log
+└────────────────────┬────────────────────┘
+                     │ graph
+┌────────────────────▼────────────────────┐
+│ Graph (JSON entities + edges)           │  ← typed nodes, weighted relationships
+│   .noman/wiki/global/entities/          │  ← one file per entity (git-versionable)
+│   .noman/wiki/global/edges.json         │  ← traversal index
+└─────────────────────────────────────────┘
+```
+
+**Global wiki** (`~/.noman/wiki/global/`) — cross-project knowledge. User preferences, architectural decisions, tool patterns, cross-references between projects.
+
+**Per-project wiki** (`<project>/.noman/wiki/`) — project-specific knowledge. Architecture decisions, module relationships, coding conventions, bug patterns.
+
+### D.2 Entity Types
+
+| Type | Example | Scope |
+|------|---------|-------|
+| `project` | noman-cli, acecapital | global |
+| `tool` | pytest, Textual, Knex.js | global |
+| `concept` | Largest Remainder Method, WACC | project |
+| `database` | saral_lagani_db, ace_capital | project |
+| `framework` | Next.js, Express, Express | global |
+| `api` | OpenAI API, MySQL MCP | global |
+| `config` | pyproject.toml, .env | project |
+| `bug` | RichLog text export bug | project |
+| `fix` | subclass RichLog workaround | project |
+| `pattern` | LLM Wiki, overlay architecture | global |
+
+### D.3 Edge Types
+
+| Type | Meaning | Direction |
+|------|---------|-----------|
+| `uses` | Project uses tool/framework | project → tool |
+| `references` | Concept references tool/pattern | concept → entity |
+| `depends_on` | Module depends on module | file → file |
+| `implements` | Code implements concept | code → concept |
+| `relates_to` | Loose association | entity ↔ entity |
+| `contradicts` | New info conflicts with old | entity ↔ entity |
+| `extends` | Subclass / improvement | entity → entity |
+| `part_of` | Component belongs to | entity → entity |
+| `originated_from` | Source → extracted entity | source → entity |
+| `similar_to` | Two things are alike | entity ↔ entity |
+
+### D.4 Operations
+
+**Ingest** — drop a source (conversation, file, article), LLM extracts entities + relations, updates graph + wiki pages.
+
+**Query** — search pages by text, look up entities, traverse graph neighbors, get index catalog.
+
+**Lint** — health checks: orphaned pages, stale entities (>180 days), pages without graph entities.
+
+### D.5 Agent-Facing Tools
+
+| Tool | Purpose |
+|------|---------|
+| `wiki_graph_summary` | Get graph stats (entity count, edge count, type breakdown) |
+| `wiki_list_entities` | List entities, optionally filtered by type/scope |
+| `wiki_search_pages` | Full-text search across all wiki pages |
+| `wiki_get_page` | Get full content of a specific wiki page |
+| `wiki_query_graph` | Get neighbors of an entity (BFS up to depth N) |
+| `wiki_lint` | Run health checks, report issues |
+| `wiki_index` | Get the catalog of all pages |
+|| `wiki_init` | Initialize a knowledge graph for the current project. Scans the project directory, extracts entities and relations, and populates the wiki. Idempotent — safe to run multiple times. |
+
+### D.6 Data Storage
+
+```
+~/.noman/wiki/
+├── global/
+│   ├── entities/           ← one .json file per entity
+│   │   ├── project_a1b2c3.json
+│   │   ├── tool_d4e5f6.json
+│   │   └── concept_789abc.json
+│   ├── edges.json          ← adjacency list (all edges)
+│   ├── pages/              ← markdown pages
+│   │   ├── project_a1b2c3.md
+│   │   ├── tool_d4e5f6.md
+│   │   └── ...
+│   ├── index.json          ← page catalog
+│   └── log.md              ← event log
+└── <project>/.noman/wiki/
+    └── (same structure)
+```
+
+Each entity file is git-versionable. Users can `git diff` entity changes over time. The wiki is a knowledge base that compounds across projects and sessions.
+
+---
+
+## 9. The Conflict-Free Update Flow
 
 The end-to-end story for *"user pushes upstream, agent keeps its learnings"*:
 

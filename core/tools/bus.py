@@ -42,6 +42,15 @@ class ToolBus:
         self.net = network_sandbox
         self.signer = signer
         self.quotas = quotas
+        self._wiki: Any = None
+
+    @property
+    def wiki(self) -> Any:
+        return self._wiki
+
+    @wiki.setter
+    def wiki(self, value: Any) -> None:
+        self._wiki = value
 
     def register(self, tool: Tool) -> None:
         """Register a tool after optional signature verification."""

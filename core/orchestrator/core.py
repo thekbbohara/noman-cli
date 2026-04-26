@@ -17,6 +17,7 @@ from core.errors.circuit_breaker import CircuitBreaker, CircuitBreakerOpenError
 from core.memory import MemorySystem
 from core.tools import ToolBus
 from core.utils.retry import RetryConfig, RetryManager
+from core.wiki import Wiki
 
 logger = logging.getLogger(__name__)
 
@@ -65,9 +66,15 @@ class ReActStep:
 
 
 class PromptAssembler:
-    def __init__(self, tools: ToolBus, context: ContextManager | None = None) -> None:
+    def __init__(
+        self,
+        tools: ToolBus,
+        context: ContextManager | None = None,
+        wiki: Wiki | None = None,
+    ) -> None:
         self._tools = tools
         self._context = context
+        self._wiki = wiki
 
     @property
     def available_tools(self) -> str:
@@ -78,6 +85,15 @@ class PromptAssembler:
     @property
     def system_prompt(self) -> str:
         tools_list = self.available_tools
+        wiki_info = ""
+        if self._wiki:
+            summary = self._wiki.graph.summarize()
+            wiki_info = f"""
+
+You have access to a knowledge graph/wiki subsystem (global + per-project).
+Graph state: {summary['entity_count']} entities, {summary['edge_count']} edges.
+Use wiki tools to query the graph, search pages, and maintain knowledge.
+"""
         return f"""You are NoMan, an autonomous coding agent.
 
 You operate within a token budget. Be concise and efficient.
@@ -92,7 +108,7 @@ RULES:
 - NEVER return `is_final_result: true` while still having tools to call.
 - ALWAYS call a tool if you need to check, search, read, or verify information.
 
-Available tools: {tools_list}
+Available tools: {tools_list}{wiki_info}
 
 Workflow per turn:
 1. REASON - Think about what to do
@@ -158,13 +174,15 @@ class Orchestrator:
         config: OrchestratorConfig | None = None,
         context: ContextManager | None = None,
         memory: MemorySystem | None = None,
+        wiki: Wiki | None = None,
     ) -> None:
         self._adapter = adapter
         self._tools = tools
         self._cfg = config or OrchestratorConfig()
         self._context = context
         self._memory = memory
-        self._assembler = PromptAssembler(tools, context)
+        self._wiki = wiki
+        self._assembler = PromptAssembler(tools, context, wiki)
         self._state = OrchestratorState.IDLE
         self._current_session: Session | None = None
         self._breaker = CircuitBreaker("adapter")
