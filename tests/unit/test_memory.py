@@ -1,22 +1,17 @@
 """Tests for core/memory/store.py — SQLite-backed tiered memory."""
 
-import sqlite3
-import tempfile
-from pathlib import Path
 
 import pytest
 
 from core.memory.store import (
+    DEFAULT_TTL,
+    SCOPES,
+    TIERS,
     MemoryConfig,
     MemoryEntry,
     MemoryStore,
     MemorySystem,
-    MemorySystem,
-    DEFAULT_TTL,
-    TIERS,
-    SCOPES,
 )
-
 
 # ── Constants ────────────────────────────────────────────────────────
 

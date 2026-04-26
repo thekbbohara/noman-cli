@@ -3,20 +3,19 @@
 from __future__ import annotations
 
 import logging
-import random
 import uuid
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
+from core.errors import SelfModificationError
 from core.selfimprove.critic import TraceCritic, TraceScore
 from core.selfimprove.safety_guardrails import SafetyGuardrails
-from core.errors import SelfModificationError
 
 logger = logging.getLogger(__name__)
 
 
-class ChangeType(str, Enum):
+class ChangeType(StrEnum):
     """Types of self-improvement changes the MetaAgent can propose."""
 
     PROMPT_TWEAK = "prompt_tweak"
@@ -32,7 +31,8 @@ class ChangeType(str, Enum):
 
 @dataclass
 class ImprovementProposal:
-    """A validated self-improvement proposal.
+    """
+    A validated self-improvement proposal.
 
     Attributes:
         proposal_id:  Unique identifier for this proposal.
@@ -75,7 +75,8 @@ class ImprovementProposal:
 
 @dataclass
 class ImprovementResult:
-    """Container for a set of validated improvement proposals.
+    """
+    Container for a set of validated improvement proposals.
 
     Attributes:
         proposals:  List of validated ImprovementProposal objects.
@@ -96,7 +97,8 @@ class ImprovementResult:
 
 
 class MetaAgent:
-    """Proposes self-improvements based on trace critic scores.
+    """
+    Proposes self-improvements based on trace critic scores.
 
     Takes execution traces, scores them via TraceCritic, and generates
     improvement proposals (prompt tweaks, heuristic additions, skill
@@ -124,7 +126,8 @@ class MetaAgent:
     # ------------------------------------------------------------------
 
     def analyze(self, trace: dict[str, Any]) -> ImprovementResult:
-        """Analyze a trace and return validated improvement proposals.
+        """
+        Analyze a trace and return validated improvement proposals.
 
         Args:
             trace:  Execution trace dict with ``turns``, ``tool_calls``,
@@ -158,7 +161,8 @@ class MetaAgent:
         trace: dict[str, Any],
         target_file: str,
     ) -> ImprovementResult:
-        """Generate proposals specifically targeting one file.
+        """
+        Generate proposals specifically targeting one file.
 
         Args:
             trace:  Execution trace dict.
@@ -241,6 +245,27 @@ class MetaAgent:
                 requires_approval=True,
                 reasoning=f"Score {score.overall:.0f}/100 suggests prompt-level inefficiency. "
                           f"Adding anti-redundancy instruction may reduce wasted tool calls.",
+                trace_score=score,
+            )
+        ]
+
+    def _propose_bug_fix(
+        self, target_file: str, score: TraceScore
+    ) -> list[ImprovementProposal]:
+        """Generate a bug fix proposal."""
+        fix_id = f"fix_{uuid.uuid4().hex[:8]}"
+        return [
+            ImprovementProposal(
+                proposal_id=fix_id,
+                change_type=ChangeType.BUG_FIX,
+                description="Review and fix correctness issues in trace",
+                target_file=target_file,
+                old_content="",
+                new_content="",
+                confidence=0.6,
+                requires_approval=True,
+                reasoning=f"Correctness score {score.correctness:.0f}/100 indicates "
+                          f"execution errors. Reviewing trace for bugs is recommended.",
                 trace_score=score,
             )
         ]
@@ -357,7 +382,8 @@ class MetaAgent:
     # ------------------------------------------------------------------
 
     def _validate_proposal(self, proposal: ImprovementProposal) -> None:
-        """Validate a proposal through safety guardrails.
+        """
+        Validate a proposal through safety guardrails.
 
         Raises:
             SelfModificationError:  If the proposal violates any guardrail.

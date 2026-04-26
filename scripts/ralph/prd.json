@@ -1,0 +1,63 @@
+{
+  "project": "noman-cli",
+  "branchName": "superproject-remediation",
+  "description": "Fix remaining superproject debt: mypy errors, ruff lint errors, Textual signature overrides, enum deprecation, line length",
+  "stories": [
+    {
+      "id": "STORY-1",
+      "title": "Fix mypy union-attr errors in core/memory/store.py",
+      "priority": 1,
+      "description": "core/memory/store.py has 10 union-attr errors where self._conn could be None. Add proper null checks or initialize connection in __init__.",
+      "passes": false
+    },
+    {
+      "id": "STORY-2",
+      "title": "Fix Textual RichLog override signatures in cli/tui.py",
+      "priority": 2,
+      "description": "cli/tui.py has 6 mypy errors from overriding RichLog.write(), clear(), write_markup() with incompatible signatures. Also fix TUIMetrics reactive annotation and notify severity literal types.",
+      "passes": false
+    },
+    {
+      "id": "STORY-3",
+      "title": "Fix ChangeType inheritance and AVAILABLE_TOOLS/SYSTEM_PROMPT naming",
+      "priority": 3,
+      "description": "core/selfimprove/meta_agent.py:18 - ChangeType should use StrEnum instead of (str, Enum). core/orchestrator/core.py - rename AVAILABLE_TOOLS and SYSTEM_PROMPT to lowercase per N802.",
+      "passes": false
+    },
+    {
+      "id": "STORY-4",
+      "title": "Fix remaining E501 line length violations",
+      "priority": 4,
+      "description": "Fix remaining 30 E501 line length errors across cli/tui.py, cli/main.py, cli/parser.py, core/selfimprove/critic.py, core/tools/__init__.py, tests/unit/.",
+      "passes": false
+    },
+    {
+      "id": "STORY-5",
+      "title": "Fix UP042 StrEnum migration in core/selfimprove/meta_agent.py",
+      "priority": 3,
+      "description": "core/selfimprove/meta_agent.py:18 - ChangeType inherits from both str and Enum. Use StrEnum (Python 3.11+).",
+      "passes": false
+    },
+    {
+      "id": "STORY-6",
+      "title": "Fix mypy arg-type error in core/orchestrator/core.py",
+      "priority": 5,
+      "description": "core/orchestrator/core.py:310 - assemble() receives Session | None but expects Session. Add None guard.",
+      "passes": false
+    },
+    {
+      "id": "STORY-7",
+      "title": "Fix notify severity literal types in cli/tui.py",
+      "priority": 5,
+      "description": "cli/tui.py lines 343 and 503 use severity='info' but Textual expects 'information'. Fix literal type.",
+      "passes": false
+    },
+    {
+      "id": "STORY-8",
+      "title": "Final verification: run ruff, mypy, pytest",
+      "priority": 99,
+      "description": "Run all quality checks. Verify ruff check passes (0 errors), mypy passes (0 errors), pytest passes (274/274). Update SUPERPROJECT.md with final scorecard.",
+      "passes": false
+    }
+  ]
+}

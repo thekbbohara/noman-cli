@@ -1,23 +1,17 @@
 """Tests for core/orchestrator/core.py — ReAct loop orchestrator."""
 
-import json
-import tempfile
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
 from core.orchestrator.core import (
-    Orchestrator,
     OrchestratorConfig,
     OrchestratorState,
     PromptAssembler,
-    ReActStep,
     Session,
     Turn,
     _flatten_tool_calls,
 )
-
 
 # ── Dataclasses ──────────────────────────────────────────────────────
 
@@ -63,9 +57,9 @@ async def test_prompt_assembler_system_prompt():
     tools = MagicMock()
     tools.list_tools.return_value = ["read_file", "edit_file"]
     pa = PromptAssembler(tools)
-    assert "Available tools" in pa.SYSTEM_PROMPT
-    assert "read_file" in pa.AVAILABLE_TOOLS
-    assert "edit_file" in pa.AVAILABLE_TOOLS
+    assert "Available tools" in pa.system_prompt
+    assert "read_file" in pa.available_tools
+    assert "edit_file" in pa.available_tools
 
 
 @pytest.mark.asyncio

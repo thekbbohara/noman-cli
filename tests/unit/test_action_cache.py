@@ -4,7 +4,6 @@ import pytest
 
 from core.utils.action_cache import ActionCache, _make_key
 
-
 # ── _make_key ────────────────────────────────────────────────────────
 
 def test_make_key_deterministic():
@@ -89,7 +88,7 @@ def test_clear():
 
 
 def test_invalidate():
-    """invalidate should correctly remove entries by tool name."""
+    """Invalidate should correctly remove entries by tool name."""
     cache = ActionCache()
     cache.set("read_file", "content", args=("a.py",))
     cache.set("read_file", "content2", args=("b.py",))

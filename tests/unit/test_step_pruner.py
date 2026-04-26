@@ -1,6 +1,5 @@
 """Tests for core/utils/step_pruner.py — Step pruner."""
 
-import pytest
 
 from core.utils.step_pruner import StepPruner
 

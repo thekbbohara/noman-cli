@@ -9,7 +9,7 @@ packages = ["cli", "core", "core.context", "core.memory", "core.orchestrator"]
 name = "noman-cli"
 version = "0.1.0"
 description = "A model-agnostic agentic coding CLI"
-# readme = "docs/README.md"
+readme = "docs/README.md"
 license = {text = "MIT"}
 requires-python = ">=3.11"
 classifiers = [
@@ -82,3 +82,10 @@ warn_unreachable = false
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[tool.hatch.envs.default.scripts]
+lint = "ruff check ."
+lint-fix = "ruff check . --fix"
+typecheck = "mypy ."
+test = "pytest tests/ -v --tb=short"
+test-cov = "pytest tests/ -v --tb=short --cov=cli --cov=core --cov-report=term-missing"

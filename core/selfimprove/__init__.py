@@ -1,4 +1,5 @@
-"""Self-improvement subsystem for noman-cli.
+"""
+Self-improvement subsystem for noman-cli.
 
 Provides:
     - RollbackManager:  create/restore rollback points for self-modifications.

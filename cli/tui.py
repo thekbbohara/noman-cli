@@ -13,6 +13,7 @@ from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal
 from textual.events import Key
 from textual.reactive import reactive
+from textual.scroll_view import ScrollView
 from textual.widgets import Input, RichLog, Static
 
 from core.tools import EDIT_HISTORY
@@ -35,18 +36,22 @@ class TUIMetrics:
 
 class TrackedRichLog(RichLog):
     """RichLog subclass that tracks written content for export."""
+
     content: str = ""
-    def write(self, *args, **kwargs) -> None:
+
+    def write(self, *args: object, **kwargs: object) -> RichLog:  # type: ignore[override]
         if args:
             text = str(args[0])
             self.content += text + "\n"
-        super().write(*args, **kwargs)
+        return super().write(*args, **kwargs)  # type: ignore[arg-type]
+
     def write_markup(self, markup: str, style: str | None = None) -> None:
         self.content += markup + "\n"
-        super().write_markup(markup, style)
-    def clear(self) -> None:
+        super().write_markup(markup, style)  # type: ignore[misc]
+
+    def clear(self, scroll_end: bool | None = None) -> RichLog:  # type: ignore[override]
         self.content = ""
-        super().clear()
+        return super().clear(scroll_end)  # type: ignore[call-arg]
 
 
 class NoManTUI(App):
@@ -56,30 +61,42 @@ class NoManTUI(App):
     #header { dock: top; height: 3; background: transparent; color: $text; }
     #status { width: 100%; content-align: center middle; }
     #output { height: 100%; border: none; background: transparent; color: $text; overflow-y: auto; }
-    #input-area { dock: bottom; height: 3; background: transparent; }
+    #input-area { dock: bottom; height: 5; background: transparent; }
     #input { width: 100%; background: transparent; }
     #command-palette {
         dock: top;
-        height: 15;
-        width: 60;
+        height: 10;
+        width: 80%;
+        max-width: 70;
+        margin-top: -4;
         background: $surface;
         color: $text;
         border: solid $accent;
-        padding: 1;
-        margin-top: 1;
+        padding: 1 2;
         display: none;
     }
     #command-palette.visible {
         display: block;
     }
+    #command-palette .palette-title {
+        text-align: center;
+        width: 100%;
+    }
+    #command-list {
+        height: 100%;
+    }
     .command-item {
         margin: 0;
         padding: 0 1;
         height: 2;
+        width: 100%;
     }
-    .command-item:hover {
+    .command-item:hover, .command-item.selected {
         background: $accent;
         color: $text;
+    }
+    .command-item.hidden {
+        display: none;
     }
     """
 
@@ -92,13 +109,17 @@ class NoManTUI(App):
     ]
 
     _orchestrator = None
-    _metrics = reactive(TUIMetrics)
+    _metrics: TUIMetrics = reactive(lambda: TUIMetrics())  # type: ignore[assignment,return-value,arg-type]
     _last_result_full = ""
     _last_task = ""
     _expanded = False
-    _output_buffer: str = ""  # mirrors what's written to the RichLog
-    # Force text-only clipboard — no image upload, no vision errors
+    _output_buffer: str = ""
     CLIPBOARD_READ_COMMAND: str | None = ""
+    # Command palette state
+    _command_palette_open = False
+    _filtered_commands: list[dict] = []
+    _selected_index = 0
+    _all_commands: list[dict] = []
 
     def __init__(self, orchestrator=None, **kwargs):
         super().__init__(**kwargs)
@@ -110,24 +131,26 @@ class NoManTUI(App):
             with Horizontal(id="header"):
                 yield Static("NoMan v0.0.01", id="status")
             yield TrackedRichLog(id="output", markup=True, wrap=True)
-            # Command palette (hidden by default)
+            # Command palette (hidden by default, floats above input)
             with Container(id="command-palette"):
-                yield Static("[bold]Commands:[/bold]")
-                yield Static("  /reset       - Reset current session", id="cmd-reset")
-                yield Static("  /diff        - Show file edits (Ctrl+D)", id="cmd-diff")
-                yield Static("  /save        - Save output to file (Ctrl+S)", id="cmd-save")
-                yield Static("  /model       - Switch provider (F2)", id="cmd-model")
-                yield Static("  /help        - Show this help", id="cmd-help")
-                yield Static("  /exit        - Exit NoMan", id="cmd-exit")
+                yield Static("[dim]type to filter[/dim]", classes="palette-title")
+                yield ScrollView(
+                    Container(
+                        Static("/reset       — Reset current session", id="cmd-reset", classes="command-item"),
+                        Static("/diff        — Show file edits (Ctrl+D)", id="cmd-diff", classes="command-item"),
+                        Static("/save        — Save output to file (Ctrl+S)", id="cmd-save", classes="command-item"),
+                        Static("/model       — Switch provider (F2)", id="cmd-model", classes="command-item"),
+                        Static("/help        — Show this help", id="cmd-help", classes="command-item"),
+                        Static("/exit        — Exit NoMan", id="cmd-exit", classes="command-item"),
+                    ),
+                    id="command-scroll"
+                )
             with Horizontal(id="input-area"):
                 yield Input(placeholder="Enter task... (type / for commands)", id="input", valid_empty=False)
 
     def on_mount(self) -> None:
         self.update_status()
         self.query_one("#input", Input).focus()
-        # Watch for / command in input
-        self.watch(self.query_one("#input", Input), "value", self._on_input_change)
-
         # Load last session if it exists
         if self._session_file.exists():
             try:
@@ -143,18 +166,67 @@ class NoManTUI(App):
             tools = self._orchestrator.tool_bus.list_tools()
             print(f"[LOG] Loaded {len(tools)} tools: {', '.join(tools[:10])}{'...' if len(tools) > 10 else ''}")
 
-    def _on_input_change(self, old: str, new: str) -> None:
-        """Show command palette when / is typed."""
-        if new.strip().startswith("/"):
-            self._show_command_palette()
-        else:
-            self._hide_command_palette()
+    def _build_command_list(self, filter_text: str) -> list[dict]:
+        """Build the list of available commands, optionally filtered."""
+        commands = [
+            {"label": "/reset       — Reset current session", "value": "/reset", "id": "cmd-reset"},
+            {"label": "/diff        — Show file edits (Ctrl+D)", "value": "/diff", "id": "cmd-diff"},
+            {"label": "/save        — Save output to file (Ctrl+S)", "value": "/save", "id": "cmd-save"},
+            {"label": "/model       — Switch provider (F2)", "value": "/model", "id": "cmd-model"},
+            {"label": "/help        — Show this help", "value": "/help", "id": "cmd-help"},
+            {"label": "/exit        — Exit NoMan", "value": "/exit", "id": "cmd-exit"},
+        ]
+        if not filter_text:
+            return commands
+        lower = filter_text.lower()
+        return [c for c in commands if lower in c["label"].lower() or lower in c["value"].lower()]
+
+    def _filter_palette(self, filter_text: str) -> None:
+        """Show/hide command items based on filter text."""
+        if not filter_text:
+            # Show all items
+            for item in self.query("#command-list .command-item"):
+                item.remove_class("hidden")
+            return
+        lower = filter_text.lower()
+        for item in self.query("#command-list .command-item"):
+            if isinstance(item, Static):
+                renderable = getattr(item, "renderable", None)
+                if renderable and hasattr(renderable, "plain"):
+                    match = lower in renderable.plain.lower()
+                else:
+                    match = False
+                if match:
+                    item.remove_class("hidden")
+                else:
+                    item.add_class("hidden")
+            else:
+                item.remove_class("hidden")
+
+    def _show_command_palette(self, input_value: str = "") -> None:
+        """Show the command palette above the input area; keep input focused."""
+        if self._command_palette_open:
+            # Refresh filter if input changed
+            self._filter_palette(input_value)
+            return
+        self._command_palette_open = True
+        palette = self.query_one("#command-palette", Container)
+        palette.add_class("visible")
+        self._filter_palette(input_value)
+        # Keep input focused so user can keep typing to filter
+        self.call_after_refresh(lambda: self.query_one("#input", Input).focus())
+
+    def _hide_command_palette(self) -> None:
+        """Hide the command palette."""
+        self._command_palette_open = False
+        palette = self.query_one("#command-palette", Container)
+        palette.remove_class("visible")
+        self.query_one("#input", Input).focus()
 
     def _load_session(self, content: str) -> None:
         """Load session content into the output log."""
         output = self.query_one("#output", TrackedRichLog)
         output.clear()
-        # Strip the header/metadata, show only task history
         lines = content.split("\n")
         in_history = False
         for line in lines:
@@ -163,14 +235,12 @@ class NoManTUI(App):
                 output.write(f"[dim]# Session started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}[/dim]\n")
                 continue
             if in_history and line.startswith("> "):
-                # Extract the task and result
-                session_text = line[2:]  # Remove "> "
+                session_text = line[2:]
                 if session_text.startswith("❯ "):
                     output.write(f"\n[b]{session_text}[/b]\n")
                 elif session_text.strip():
                     output.write(f"{session_text}\n")
             elif in_history and line.strip() and not line.startswith("---") and not line.startswith("#") and not line.startswith(">"):
-                # Non-empty line that's not a separator or header
                 output.write(f"{line}\n")
 
     def _update_session_status(self) -> None:
@@ -179,7 +249,6 @@ class NoManTUI(App):
         if self._session_file.exists():
             try:
                 content = self._session_file.read_text()
-                # Count tasks in session
                 task_count = content.count("❯ ")
                 size_kb = self._session_file.stat().st_size / 1024
                 status.update(f"Turn {self._metrics.turn_count} | {task_count} tasks | {size_kb:.1f}KB")
@@ -188,29 +257,34 @@ class NoManTUI(App):
         else:
             status.update(f"Turn {self._metrics.turn_count} | new session")
 
+    def on_input_changed(self, event: Input.Changed) -> None:
+        """Show/hide command palette when user types in the input field."""
+        input_value = event.value
+        if not input_value or input_value.isspace():
+            self._hide_command_palette()
+            return
+        if input_value.startswith("/"):
+            self._show_command_palette(input_value)
+        else:
+            self._hide_command_palette()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        """Hide command palette on Enter, then submit the input."""
+        self._hide_command_palette()
+        self.action_submit()
+
     def on_key(self, event: Key) -> None:
         if event.key == "enter":
             self.action_submit()
         elif event.key == "escape":
             self._hide_command_palette()
 
-    def _show_command_palette(self) -> None:
-        """Show the command palette at the top of the screen."""
-        palette = self.query_one("#command-palette", Container)
-        palette.add_class("visible")
-        self.query_one("#input", Input).blur()
-
-    def _hide_command_palette(self) -> None:
-        """Hide the command palette."""
-        palette = self.query_one("#command-palette", Container)
-        palette.remove_class("visible")
-
     def _on_click(self, event) -> None:
         """Handle clicks on command palette items."""
         if not hasattr(event, "node"):
             return
         node = event.node
-        if node and hasattr(node, "id"):
+        if node and hasattr(node, "id") and node.id and node.id.startswith("cmd-"):
             cmd_map = {
                 "cmd-reset": "/reset",
                 "cmd-diff": "/diff",
@@ -224,59 +298,59 @@ class NoManTUI(App):
                 self._hide_command_palette()
                 input_widget = self.query_one("#input", Input)
                 input_widget.value = cmd
-                self.call_after_refresh(lambda: input_widget.focus())
+                input_widget.focus()
 
     def _handle_command(self, task: str) -> bool:
         """Handle special commands. Returns True if command was handled."""
         input_widget = self.query_one("#input", Input)
-        
+
         if task == "/reset":
             self._reset_session()
             return True
-        
+
         if task == "/diff":
             self.action_diff_view()
             return True
-        
+
         if task == "/save":
             self.action_save_output()
             return True
-        
+
         if task == "/model":
             self.action_switch_model()
             return True
-        
+
         if task == "/help":
             self._show_command_palette()
             return True
-        
+
         if task == "/exit":
             self.exit()
             return True
-        
+
         return False
 
     def _reset_session(self) -> None:
         """Reset the current session — clear orchestrator, output, and session file."""
         if self._orchestrator:
             self._orchestrator.reset_session()
-        
+
         # Clear the output log
         output = self.query_one("#output", TrackedRichLog)
         output.clear()
-        
+
         # Clear the active session file
         if self._session_file.exists():
             try:
                 self._session_file.unlink()
             except Exception:
                 pass
-        
+
         # Reset metrics
         self._metrics.turn_count = 0
         self._metrics.state = TUIState.IDLE
         self.update_status()
-        self.notify("Session reset", severity="info")
+        self.notify("Session reset", severity="information")
 
     def _convert_markdown_to_textual(self, text: str) -> list:
         """Convert markdown to Rich Text objects."""
@@ -329,13 +403,13 @@ class NoManTUI(App):
         task = input_widget.value.strip()
         if not task:
             return
-        
+
         # Handle special commands
         if task.startswith("/"):
             if self._handle_command(task):
                 input_widget.value = ""
                 return
-        
+
         input_widget.value = ""
         asyncio.create_task(self.run_task(task))
 
@@ -357,6 +431,7 @@ class NoManTUI(App):
         output = self.query_one("#output", TrackedRichLog)
         output.clear()
         from difflib import unified_diff
+
         from rich.text import Text
 
         if not EDIT_HISTORY:
@@ -435,7 +510,7 @@ class NoManTUI(App):
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         file_path = session_dir / f"output_{ts}.txt"
         file_path.write_text(content)
-        self.notify(f"Saved to {file_path}", severity="info")
+        self.notify(f"Saved to {file_path}", severity="information")
 
     def write_history(self, text: str) -> None:
         session_dir = Path.home() / ".noman" / "sessions"

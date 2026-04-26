@@ -1,25 +1,11 @@
 """Unit tests for the self-improvement subsystem."""
 
-import json
-import os
-import tempfile
-import textwrap
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
-from core.selfimprove.critic import TraceCritic, TraceScore, create_critic
-from core.selfimprove.meta_agent import (
-    ChangeType,
-    ImprovementProposal,
-    ImprovementResult,
-    MetaAgent,
-)
-from core.selfimprove.rollback import RollbackManager
 from core.selfimprove import (
     ChangeType,
-    ImprovementProposal,
     ImprovementResult,
     MetaAgent,
     RollbackManager,
@@ -28,8 +14,6 @@ from core.selfimprove import (
     create_critic,
 )
 from core.selfimprove.safety_guardrails import SafetyGuardrails
-from core.errors import SelfModificationError
-
 
 # ── RollbackManager tests ───────────────────────────────────────────────
 
@@ -451,12 +435,9 @@ class TestSelfImproveIntegration:
         """Test that all classes are importable from core.selfimprove."""
         from core.selfimprove import (
             ChangeType,
-            ImprovementProposal,
-            ImprovementResult,
             MetaAgent,
             RollbackManager,
             TraceCritic,
-            TraceScore,
             create_critic,
         )
         assert ChangeType is not None

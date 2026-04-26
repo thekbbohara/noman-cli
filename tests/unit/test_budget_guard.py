@@ -5,7 +5,6 @@ import pytest
 from core.errors import QuotaExceeded
 from core.utils.budget_guard import BudgetConfig, BudgetGuard
 
-
 # ── BudgetConfig ─────────────────────────────────────────────────────
 
 def test_budget_config_defaults():

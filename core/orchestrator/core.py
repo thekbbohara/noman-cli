@@ -70,14 +70,14 @@ class PromptAssembler:
         self._context = context
 
     @property
-    def AVAILABLE_TOOLS(self) -> str:
+    def available_tools(self) -> str:
         """Dynamically generate the tool list from registered tools."""
         tool_names = self._tools.list_tools() or []
         return ", ".join(tool_names)
 
     @property
-    def SYSTEM_PROMPT(self) -> str:
-        tools_list = self.AVAILABLE_TOOLS
+    def system_prompt(self) -> str:
+        tools_list = self.available_tools
         return f"""You are NoMan, an autonomous coding agent.
 
 You operate within a token budget. Be concise and efficient.
@@ -106,7 +106,7 @@ Workflow per turn:
         messages: list[Message] = []
 
         # 1. System prompt (always first)
-        messages.append(Message(role="system", content=self.SYSTEM_PROMPT))
+        messages.append(Message(role="system", content=self.system_prompt))
 
         # 2. Convert session.turns into messages (last 10 turns = 5 user/assistant pairs)
         recent_turns = session.turns[-10:]  # 10 turns max to avoid token overflow
@@ -174,7 +174,7 @@ class Orchestrator:
             retryable_exceptions=(ConnectionError, TimeoutError),
         ))
         self._context_tokens: int | None = None
-        
+
         # Restore session from disk if it exists
         self._load_session()
 
@@ -220,20 +220,20 @@ class Orchestrator:
     async def run(self, task: str) -> str:
         # Load latest session from disk before processing
         self._load_session()
-        
+
         # Reuse existing session or create new one
         if self._current_session is None:
             self._current_session = Session(id=self._new_session_id())
             logger.info("Created new session %s", self._current_session.id)
-        
+
         turn = Turn(user_input=task)
         response = await self._execute_turn_with_tools(task)
         turn.assistant_output = response
         self._current_session.turns.append(turn)
-        
+
         # Persist session to disk
         self._save_session()
-        
+
         return response
 
     def reset_session(self) -> None:
@@ -303,9 +303,12 @@ class Orchestrator:
             logger.error("Failed to load session: %s", e)
 
     async def _execute_turn_with_tools(self, task: str) -> str:
+        if self._current_session is None:
+            return "No active session. Start a session first."
         if self._context_tokens is None:
             self._context_tokens = await self._probe_context_tokens()
         budget = int(self._context_tokens * 0.8)
+        assert self._current_session is not None
         messages, tool_defs = self._assembler.assemble(
             self._current_session, task, budget,
         )

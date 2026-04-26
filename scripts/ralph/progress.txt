@@ -1,0 +1,7 @@
+## Codebase Patterns
+- core/memory/store.py uses lazy connection pattern: _conn is None until first access
+- cli/tui.py subclasses Textual's RichLog widget — overrides must match RichLog's signature
+- Textual notify() severity literals: 'information', 'warning', 'error' (NOT 'info')
+- Python 3.11+ StrEnum preferred over (str, Enum) tuple inheritance
+- AVAILABLE_TOOLS/SYSTEM_PROMPT are @property methods, not class constants — rename to lowercase
+- mypy strict mode: union-attr errors require explicit None checks before attribute access

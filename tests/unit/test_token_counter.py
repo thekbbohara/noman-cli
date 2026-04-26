@@ -1,8 +1,6 @@
 """Tests for core/utils/token_counter.py — Token counting."""
 
-import pytest
-from core.utils.token_counter import count_tokens, count_message_tokens
-
+from core.utils.token_counter import count_message_tokens, count_tokens
 
 # ── count_tokens ─────────────────────────────────────────────────────
 

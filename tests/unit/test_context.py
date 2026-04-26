@@ -3,18 +3,14 @@
 import tempfile
 from pathlib import Path
 
-import pytest
-
 from core.context.manager import (
     ContextManager,
     ContextView,
     SkeletonCache,
     SkeletonFile,
-    SkeletonFile,
     SymbolIndex,
     SymbolSkeleton,
 )
-
 
 # ── SkeletonCache ────────────────────────────────────────────────────
 

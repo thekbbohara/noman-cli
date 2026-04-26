@@ -5,8 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
-import shutil
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -43,7 +41,8 @@ class RollbackEntry:
 
 
 def _compute_checksum(filepath: str | Path) -> str:
-    """Return SHA-256 hex digest of a file's contents, or 'empty' if missing.
+    """
+    Return SHA-256 hex digest of a file's contents, or 'empty' if missing.
 
     Directories return 'dir' as their checksum marker.
     """
@@ -68,7 +67,8 @@ def _read_file_content(filepath: str | Path) -> str:
 
 
 class RollbackManager:
-    """Manages rollback points before self-modifications.
+    """
+    Manages rollback points before self-modifications.
 
     Creates snapshot checkpoints stored as JSON in a configurable directory
     (default: ``.noman/rollbacks/``).  Each checkpoint captures file contents,
@@ -133,7 +133,8 @@ class RollbackManager:
         target_path: str | Path,
         message: str = "",
     ) -> str:
-        """Create a rollback point and return its ID.
+        """
+        Create a rollback point and return its ID.
 
         Args:
             target_path:  File or directory path to snapshot.
@@ -174,7 +175,8 @@ class RollbackManager:
         return rollback_id
 
     def execute_rollback(self, rollback_id: str) -> bool:
-        """Restore files from a rollback entry.
+        """
+        Restore files from a rollback entry.
 
         Args:
             rollback_id:  The rollback identifier to restore.

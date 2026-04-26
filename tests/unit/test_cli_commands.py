@@ -1,8 +1,6 @@
 """Tests for CLI commands: rollback, review, memory, skill, stats, emergency, init, doctor."""
 
 import json
-import os
-import subprocess
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -12,26 +10,25 @@ import pytest
 # Ensure cli.main functions are importable
 from cli.main import (
     _cmd_doctor,
-    _cmd_review,
-    _cmd_rollback,
-    _cmd_memory_list,
-    _cmd_memory_get,
-    _cmd_memory_set,
-    _cmd_memory_delete,
-    _cmd_skill_list,
-    _cmd_skill_get,
-    _cmd_skill_set,
-    _cmd_skill_add,
-    _cmd_stats,
     _cmd_emergency,
     _cmd_init,
-    _get_noman_dir,
+    _cmd_memory_delete,
+    _cmd_memory_get,
+    _cmd_memory_list,
+    _cmd_memory_set,
+    _cmd_review,
+    _cmd_rollback,
+    _cmd_skill_add,
+    _cmd_skill_get,
+    _cmd_skill_list,
+    _cmd_skill_set,
+    _cmd_stats,
     _default_config,
+    _get_noman_dir,
     _load_config,
 )
 from cli.parser import parse_args
 from core.memory.store import MemoryConfig, MemoryStore, MemorySystem
-
 
 # ── Fixtures ──────────────────────────────────────────────────────────
 

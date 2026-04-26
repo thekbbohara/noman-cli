@@ -11,7 +11,8 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class TraceScore:
-    """Structured result of a trace evaluation.
+    """
+    Structured result of a trace evaluation.
 
     Attributes:
         overall:        Overall score 0-100.
@@ -59,7 +60,8 @@ class _TraceStats:
 
 
 class TraceCritic:
-    """Heuristic scoring engine for execution traces.
+    """
+    Heuristic scoring engine for execution traces.
 
     Analyzes a trace dictionary and produces a structured score with
     feedback.  No LLM dependency — all scoring is rule-based.
@@ -93,7 +95,8 @@ class TraceCritic:
     # ------------------------------------------------------------------
 
     def score(self, trace: dict[str, Any]) -> TraceScore:
-        """Score a trace dict and return a structured TraceScore.
+        """
+        Score a trace dict and return a structured TraceScore.
 
         Args:
             trace:  Execution trace with keys ``turns``, ``tool_calls``,
@@ -223,7 +226,8 @@ class TraceCritic:
         return max(0.0, min(100.0, score))
 
     def _score_cost(self, stats: _TraceStats) -> float:
-        """Score 0-100 based on resource cost.
+        """
+        Score 0-100 based on resource cost.
 
         Lower token usage → higher score.
         """

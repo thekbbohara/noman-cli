@@ -56,6 +56,12 @@ class MemoryStore:
         self._conn: sqlite3.Connection | None = None
         self._ensure_db()
 
+    def _require_conn(self) -> sqlite3.Connection:
+        """Ensure the database connection is available."""
+        if self._conn is None:
+            raise RuntimeError("Database is closed")
+        return self._conn
+
     def _ensure_db(self) -> None:
         """Ensure database and tables exist."""
         db_path = Path(self._cfg.db_path)
@@ -117,13 +123,15 @@ class MemoryStore:
         )
 
         try:
-            self._conn.execute(
+            conn = self._require_conn()
+            conn.execute(
                 "INSERT INTO memories (id, tier, scope, key, value, source_trace_id,"
                 " created_at, updated_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 vals,
             )
         except sqlite3.IntegrityError:
-            self._conn.execute(
+            conn = self._require_conn()
+            conn.execute(
                 "UPDATE memories SET value = ?, updated_at = ?, expires_at = ?,"
                 " is_valid = 1 WHERE tier = ? AND scope = ? AND key = ?",
                 (value, now.isoformat(),
@@ -131,7 +139,7 @@ class MemoryStore:
             )
             entry_id = f"updated:{tier}:{scope}:{key}"
 
-        self._conn.commit()
+        self._require_conn().commit()
         logger.debug(f"Remembered: {tier}/{scope}/{key}")
         return entry_id
 
@@ -159,7 +167,8 @@ class MemoryStore:
         sql += " ORDER BY created_at DESC LIMIT ?"
         params.append(limit)
 
-        cursor = self._conn.execute(sql, params)
+        conn = self._require_conn()
+        cursor = conn.execute(sql, params)
         rows = cursor.fetchall()
 
         return [
@@ -181,32 +190,35 @@ class MemoryStore:
 
     def forget(self, tier: str, scope: str, key: str) -> bool:
         """Soft-delete a memory."""
-        cursor = self._conn.execute(
+        conn = self._require_conn()
+        cursor = conn.execute(
             "UPDATE memories SET is_valid = 0 WHERE tier = ? AND scope = ? AND key = ?",
             (tier, scope, key),
         )
-        self._conn.commit()
+        conn.commit()
         return cursor.rowcount > 0
 
     def cleanup_expired(self) -> int:
         """Remove expired memories. Returns count removed."""
         now = datetime.utcnow().isoformat()
-        cursor = self._conn.execute(
+        conn = self._require_conn()
+        cursor = conn.execute(
             "DELETE FROM memories WHERE expires_at IS NOT NULL AND expires_at < ?",
             (now,),
         )
-        self._conn.commit()
+        conn.commit()
         return cursor.rowcount
 
     def count(self, tier: str | None = None) -> int:
         """Count memories."""
+        conn = self._require_conn()
         if tier:
-            cursor = self._conn.execute(
+            cursor = conn.execute(
                 "SELECT COUNT(*) FROM memories WHERE tier = ? AND is_valid = 1",
                 (tier,),
             )
         else:
-            cursor = self._conn.execute(
+            cursor = conn.execute(
                 "SELECT COUNT(*) FROM memories WHERE is_valid = 1"
             )
         return cursor.fetchone()[0]
