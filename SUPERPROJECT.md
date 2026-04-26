@@ -21,12 +21,12 @@
 
 | Area | Before | After | Notes |
 |---|---:|---:|---|
-| Purpose & README | 5/5 | 4/5 | docs/README.md exists but no root README.md (pypi discoverability gap) |
+| Purpose & README | 5/5 | 5/5 | Root README.md created; pypi discoverability fixed |
 | Setup Reproducibility | 5/5 | 5/5 | .env.example, pyproject.toml dev deps, Makefile |
 | Build Command | 5/5 | 5/5 | `pip install -e .` works |
 | Test Command | 5/5 | 5/5 | 274/274 passing |
-| Lint/Format | 3/5 | 3/5 | 41 ruff errors remain (mostly E501 line length) |
-| Type/Static Checks | 2/5 | 2/5 | 20 mypy errors (mostly Textual override signature issues) |
+| Lint/Format | 3/5 | 3/5 | 33 ruff errors remain (all E501 line length — cosmetic) |
+| Type/Static Checks | 2/5 | 5/5 | mypy clean (0 errors) — fixed Textual overrides, union-attr, missing method |
 | Architecture Clarity | 5/5 | 5/5 | Excellent docs/ARCHITECTURE.md, docs/subsystem/ |
 | Error Handling | 4/5 | 4/5 | Circuit breakers, guardrails present |
 | Security Hygiene | 4/5 | 4/5 | .env.example, SECURITY.md, sandboxing, no secrets committed |
@@ -42,21 +42,38 @@
 | Command | Result |
 |---|---|
 | `pytest tests/ -v` | 274 passed |
-| `ruff check .` | 41 errors (30 E501 line length, 5 F811 redefinition, 2 N802 naming, 2 UP042, 2 others) |
-| `mypy .` | 20 errors (10 union-attr on sqlite3.Connection, 6 Textual override issues, 4 other) |
+| `ruff check .` | 33 errors (all E501 line length — cosmetic, not auto-fixable) |
+| `mypy .` | 0 errors — clean |
 
-## Remaining Recommendations
+## Completed Improvements (Ralph Loop)
 
-### Quick Wins (low risk, high impact)
-1. **Create root README.md** — link to or inline the docs/README.md content for pypi/npm discoverability
-2. **Uncomment `readme` in pyproject.toml** — point to docs/README.md
-3. **Fix duplicate imports in test_selfimprove.py** — 5 F811 errors from double imports
+### STORY-1: mypy union-attr in core/memory/store.py
+- Added `_require_conn()` helper that asserts connection is available
+- Replaced all `self._conn` in public methods with `self._require_conn()`
+- Result: 0 mypy errors in store.py
 
-### Medium Priority
-4. **Fix mypy union-attr errors in core/memory/store.py** — add null checks for `self._conn` before `.execute()`/`.commit()` calls (10 errors)
-5. **Fix Textual RichLog override signatures in cli/tui.py** — 6 errors from overriding `write`, `clear`, `write_markup` with incompatible signatures
-6. **Fix ChangeType inheritance** — use `StrEnum` instead of `(str, Enum)` (core/selfimprove/meta_agent.py:18)
-7. **Fix AVAILABLE_TOOLS/SYSTEM_PROMPT naming** — rename to `available_tools`/`system_prompt` per N802
+### STORY-2/6: Textual override fixes + Session | None guard
+- Fixed `TrackedRichLog.write()` return type → `RichLog`
+- Fixed `TrackedRichLog.clear()` signature to match Textual stubs
+- Added `scroll_end` parameter to `clear()` and `notify()` severity `'information'`
+- Added `_require_conn()` pattern for safe database access
+- Added None guard in `_execute_turn_with_tools()` for `_current_session`
+
+### STORY-3/5: ChangeType StrEnum + AVAILABLE_TOOLS/SYSTEM_PROMPT rename
+- Changed `ChangeType` from `(str, Enum)` to `StrEnum`
+- Renamed `AVAILABLE_TOOLS` → `available_tools`, `SYSTEM_PROMPT` → `system_prompt`
+- Updated test references in `test_orchestrator.py`
+
+### Bonus: Fixed missing `_propose_bug_fix` method
+- Added the missing method that was called but never defined
+- Returns `ImprovementProposal` with `BUG_FIX` change type
+
+### Other: Root README.md + pyproject.toml readme
+- Created root `README.md` for pypi discoverability
+- Uncommented `readme` field in pyproject.toml
+
+### Duplicate imports removed
+- Fixed 5 F811 errors in `test_selfimprove.py`
 
 ### Lower Priority
 8. **Fix E501 line length violations** — 30 remaining, mostly in cli/tui.py (UI strings) and tests
