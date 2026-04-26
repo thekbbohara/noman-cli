@@ -7,7 +7,7 @@ import sys
 
 _COMMANDS = {
     "doctor", "review", "rollback", "memory", "skill", "stats", "emergency",
-    "init",
+    "init", "catalog",
 }
 
 
@@ -101,6 +101,13 @@ def build_subparsers() -> argparse.ArgumentParser:
 
     # -- init --
     sub.add_parser("init", help="Scaffold .noman/ directory")
+
+    # -- catalog --
+    cat = sub.add_parser("catalog", help="List all Hermes agent tools and features")
+    cat.add_argument("--tools", "-t", action="store_true", help="Show tools only")
+    cat.add_argument("--skills", "-s", action="store_true", help="Show skills only")
+    cat.add_argument("--summary", action="store_true", help="Show summary counts only")
+    cat.add_argument("--by-category", "-c", action="store_true", help="Group by category")
 
     return parser
 

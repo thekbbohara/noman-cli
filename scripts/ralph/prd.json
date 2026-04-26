@@ -1,7 +1,7 @@
 {
   "project": "noman-cli",
   "branchName": "superproject-remediation",
-  "description": "Fix remaining superproject debt: mypy errors, ruff lint errors, Textual signature overrides, enum deprecation, line length",
+  "description": "Fix remaining superproject debt + add tools catalog feature",
   "stories": [
     {
       "id": "STORY-1",
@@ -54,6 +54,13 @@
     },
     {
       "id": "STORY-8",
+      "title": "Add tools catalog module and CLI command",
+      "priority": 6,
+      "description": "Add core/tools/tools_catalog.py with full inventory of 100 Hermes tools + 109 skills. Add 'noman catalog' CLI command with --summary, --by-category, --tools, --skills flags.",
+      "passes": true
+    },
+    {
+      "id": "STORY-9",
       "title": "Final verification: run ruff, mypy, pytest",
       "priority": 99,
       "description": "Run all quality checks. Verify ruff check passes (0 errors), mypy passes (0 errors), pytest passes (274/274). Update SUPERPROJECT.md with final scorecard.",

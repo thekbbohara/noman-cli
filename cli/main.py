@@ -675,6 +675,72 @@ level = "INFO"
     return 0
 
 
+def _cmd_catalog(args) -> int:
+    """List all Hermes agent tools and features."""
+    from core.tools.tools_catalog import (
+        SKILLS,
+        TOOLS,
+        TOTAL_SKILLS,
+        TOTAL_TOOLS,
+        format_skills_table,
+        format_tools_table,
+        get_skills_by_category,
+        get_tool_count,
+        get_tools_by_category,
+    )
+
+    show_tools = getattr(args, "tools", False)
+    show_skills = getattr(args, "skills", False)
+    summary_only = getattr(args, "summary", False)
+    by_category = getattr(args, "by_category", False)
+
+    if summary_only:
+        counts = get_tool_count()
+        print("=== Hermes Agent — Feature Catalog Summary ===\n")
+        print(f"Total tools: {TOTAL_TOOLS}")
+        print(f"Total skills: {TOTAL_SKILLS}")
+        print("\nTools by category:")
+        for cat, count in sorted(counts["tools_by_category"].items()):
+            print(f"  {cat:<22} {count:>3} tools")
+        print("\nSkills by category:")
+        for cat, count in sorted(counts["skills_by_category"].items()):
+            print(f"  {cat:<22} {count:>3} skills")
+        return 0
+
+    if not show_tools and not show_skills:
+        show_tools = True
+        show_skills = True
+
+    if show_tools:
+        print(f"=== Hermes Agent — Tools Catalog ({TOTAL_TOOLS} tools) ===\n")
+        if by_category:
+            groups = get_tools_by_category()
+            for cat, tools in sorted(groups.items()):
+                print(f"\n--- {cat} ({len(tools)} tools) ---")
+                for t in tools:
+                    params = ", ".join(t.params) if t.params else "—"
+                    print(f"  {t.name:<42} [{params}]")
+                    if t.notes:
+                        print(f"    {t.notes}")
+        else:
+            print(format_tools_table(TOOLS))
+
+    if show_skills:
+        print(f"\n=== Hermes Agent — Skills Library ({TOTAL_SKILLS} skills) ===\n")
+        if by_category:
+            skill_groups = get_skills_by_category()
+            for cat, skills in sorted(skill_groups.items()):
+                print(f"\n--- {cat} ({len(skills)} skills) ---")
+                for s in skills:
+                    desc = s.description[:55] + "..." if len(s.description) > 55 else s.description
+                    print(f"  {s.name:<40} {desc}")
+        else:
+            print(format_skills_table(SKILLS))
+
+    print(f"\n=== Total: {TOTAL_TOOLS} tools + {TOTAL_SKILLS} skills ===")
+    return 0
+
+
 def main(argv=None):
     args = parse_args(argv)
 
@@ -769,6 +835,9 @@ def main(argv=None):
 
     if args.command == "init":
         return _cmd_init()
+
+    if args.command == "catalog":
+        return _cmd_catalog(args)
 
     # Default: run task or REPL
     if args.task:

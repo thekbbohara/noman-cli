@@ -1,10 +1,21 @@
 ## Codebase Patterns
-- core/memory/store.py uses lazy connection pattern: _conn is None until first access
-- core/memory/store.py: Use _require_conn() helper for safe database access
-- cli/tui.py subclasses Textual's RichLog widget — overrides must match RichLog's signature
-- Textual notify() severity literals: 'information', 'warning', 'error' (NOT 'info')
-- Python 3.11+ StrEnum preferred over (str, Enum) tuple inheritance
-- available_tools/system_prompt are @property methods in PromptAssembler, not class constants
-- mypy strict mode: union-attr errors require explicit None checks before attribute access
-- reactive() with lambda needs explicit TUIMetrics type annotation: reactive(lambda: TUIMetrics())
-- Static widgets from self.query() need isinstance check before accessing renderable
+- mypy errors were mostly pre-fixed; only cli/main.py had a type issue (fixed)
+- ruff E501 cannot auto-fix line-length — requires manual breaks
+- 274 tests all pass across the full suite
+
+## Ralph Loop Progress
+### Completed Stories
+- STORY-1: PASS — mypy union-attr fixed (mypy now 0 errors)
+- STORY-2: PASS — RichLog override signatures fixed (mypy passes)
+- STORY-3: PASS — StrEnum/available_tools naming verified (mypy clean)
+- STORY-4: PARTIAL — 7 E501 auto-fixed, 213 remaining (ruff can't auto-fix line length)
+- STORY-5: PASS — StrEnum migration verified (no UP042 errors)
+- STORY-6: PASS — mypy arg-type fixed (mypy clean)
+- STORY-7: PASS — notify severity literals verified
+- STORY-8: PASS — tools catalog module + CLI command added (100 tools + 109 skills)
+### Remaining
+- STORY-9: PENDING — needs final verification (see below)
+
+### Remaining Work
+- 213 E501 line-length violations need manual fixes
+- These are cosmetic and do not block functionality
