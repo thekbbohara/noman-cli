@@ -402,6 +402,103 @@ class Wiki:
     def _log_event(self, event_type: str, detail: str, page_id: str = "") -> None:
         self.log_event(event_type, detail, page_id)
 
+
+    # --- Incremental updates ---
+
+    def get_file_hashes(self, project_path: str | Path) -> dict[str, str]:
+        """Compute file hashes for all source files in a project."""
+        hashes = {}
+        project = Path(project_path)
+        for src_dir in ['core', 'src', 'lib', 'app']:
+            src_path = project / src_dir
+            if not src_path.exists():
+                continue
+            for root, dirs, files in os.walk(src_path):
+                # Skip noise
+                dirs[:] = [d for d in dirs if d not in {
+                    '.venv', 'node_modules', '__pycache__', '.pytest_cache',
+                    '.ruff_cache', '.git', '.mypy_cache', '.worktrees',
+                    '.github', '.vscode', '.idea', 'dist', 'build',
+                }]
+                for f in files:
+                    if f.endswith(('.py', '.ts', '.tsx', '.js', '.jsx', '.rs', '.go')):
+                        fpath = Path(root) / f
+                        try:
+                            content = fpath.read_text()
+                            hashes[str(fpath)] = hashlib.sha256(content.encode()).hexdigest()[:16]
+                        except Exception:
+                            pass
+        return hashes
+
+    def load_file_hashes(self) -> dict[str, str]:
+        """Load previously stored file hashes."""
+        hashes_file = self._base / "file_hashes.json"
+        if hashes_file.exists():
+            try:
+                return json.loads(hashes_file.read_text())
+            except Exception:
+                pass
+        return {}
+
+    def save_file_hashes(self, hashes: dict[str, str]) -> None:
+        """Save current file hashes for incremental detection."""
+        hashes_file = self._base / "file_hashes.json"
+        hashes_file.write_text(json.dumps(hashes, indent=2))
+
+    def get_changed_files(self, project_path: str | Path) -> list[str]:
+        """Get list of files that have changed since last scan."""
+        current = self.get_file_hashes(project_path)
+        stored = self.load_file_hashes()
+        changed = [f for f, h in current.items() if h != stored.get(f)]
+        return changed
+
+    def get_new_files(self, project_path: str | Path) -> list[str]:
+        """Get list of new files not previously tracked."""
+        current = self.get_file_hashes(project_path)
+        stored = self.load_file_hashes()
+        return [f for f in current if f not in stored]
+
+    def get_deleted_files(self, project_path: str | Path) -> list[str]:
+        """Get list of files that existed before but no longer exist."""
+        current = self.get_file_hashes(project_path)
+        stored = self.load_file_hashes()
+        return [f for f in stored if f not in current]
+
+    def get_incremental_summary(self, project_path: str | Path) -> dict:
+        """Get summary of what would be updated."""
+        changed = self.get_changed_files(project_path)
+        new = self.get_new_files(project_path)
+        deleted = self.get_deleted_files(project_path)
+        return {
+            'changed': len(changed),
+            'new': len(new),
+            'deleted': len(deleted),
+            'total_files': len(self.get_file_hashes(project_path)),
+        }
+
+    def save_version(self, version: str) -> None:
+        """Save current wiki version for diff tracking."""
+        version_file = self._base / "version.json"
+        current = self.get_index()
+        version_file.write_text(json.dumps({
+            'version': version,
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'entities': len(self.graph.list_entities(limit=10000)),
+            'edges': self.graph.edge_count(),
+            'pages': len(current),
+        }, indent=2))
+
+    def get_current_version(self) -> str | None:
+        """Get current wiki version."""
+        version_file = self._base / "version.json"
+        if version_file.exists():
+            try:
+                data = json.loads(version_file.read_text())
+                return data.get('version')
+            except Exception:
+                pass
+        return None
+
     def reset(self) -> None:
         """Clear all wiki data."""
         import shutil
@@ -410,3 +507,73 @@ class Wiki:
             shutil.rmtree(self._base)
         self._base.mkdir(parents=True, exist_ok=True)
         self._graph.reset()
+
+    # --- Semantic search ---
+
+    def semantic_search(self, query: str, limit: int = 10) -> list[dict]:
+        """Search pages using semantic similarity.
+
+        Uses embeddings to find conceptually similar pages,
+        not just exact text matches.
+        """
+        from core.wiki.embeddings import semantic_search as _semantic_search
+        return _semantic_search(self, query, limit)
+
+    # --- Cross-project linking ---
+
+    def link_cross_project(self, local_entity_id: str, target_project: str, target_entity_id: str, similarity: float = 0.0) -> bool:
+        """Link a local entity to an entity in another project's wiki."""
+        if self._graph.get_entity(local_entity_id):
+            self._graph.add_cross_project_link(local_entity_id, target_project, target_entity_id, similarity)
+            return True
+        return False
+
+    def get_cross_links(self, entity_id: str) -> list[dict]:
+        """Get cross-project links for an entity."""
+        return self._graph.get_cross_project_links(entity_id)
+
+    def list_all_cross_links(self) -> list[dict]:
+        """List all cross-project links across the wiki."""
+        return self._graph.list_all_cross_links()
+
+    # --- Hotspot listing ---
+
+    def get_hotspots(self, threshold: float = 0.5, limit: int = 20) -> list[dict]:
+        """Get high-risk entities (complexity + churn)."""
+        entities = self._graph.list_entities(limit=1000)
+        hotspots = []
+        for e in entities:
+            complexity = e.metadata.get('complexity', 0)
+            hotspot = e.metadata.get('hotspot_score', 0.0)
+            churn = e.metadata.get('churn_per_week', 0.0)
+            if complexity > 0 or hotspot > 0 or churn > 0:
+                score = max(complexity / 10.0, hotspot, churn / 5.0)
+                if score >= threshold:
+                    hotspots.append({
+                        'entity_id': e.id,
+                        'name': e.name,
+                        'type': e.entity_type.value,
+                        'complexity': complexity,
+                        'hotspot_score': hotspot,
+                        'churn': churn,
+                        'score': round(score, 3),
+                    })
+        hotspots.sort(key=lambda x: x['score'], reverse=True)
+        return hotspots[:limit]
+
+    # --- Dedup ---
+
+    def dedup(self, threshold: float = 0.75) -> dict:
+        """Run entity deduplication."""
+        result = self._graph.dedup(threshold)
+        return result
+
+    # --- Visualization ---
+
+    def render_ascii_graph(self, entity_id: str | None = None, depth: int = 2) -> str:
+        """Render the graph as ASCII diagram."""
+        return self._graph.render_ascii(entity_id, depth)
+
+    def render_mermaid_graph(self, entity_id: str | None = None, depth: int = 2) -> str:
+        """Render the graph as Mermaid diagram."""
+        return self._graph.render_mermaid(entity_id, depth)

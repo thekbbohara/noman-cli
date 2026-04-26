@@ -229,6 +229,71 @@ class NoManTUI(App):
                 "value": "/wiki_lint",
                 "id": "cmd-wiki-lint",
             },
+            {
+                "label": "/wiki_query   — Query graph (neighbors)",
+                "value": "/wiki_query",
+                "id": "cmd-wiki-query",
+            },
+            {
+                "label": "/wiki_pages   — Get a wiki page",
+                "value": "/wiki_pages",
+                "id": "cmd-wiki-pages",
+            },
+            {
+                "label": "/wiki_semantic — Concept search",
+                "value": "/wiki_semantic",
+                "id": "cmd-wiki-semantic",
+            },
+            {
+                "label": "/wiki_dedup   — Deduplicate entities",
+                "value": "/wiki_dedup",
+                "id": "cmd-wiki-dedup",
+            },
+            {
+                "label": "/wiki_sync    — Incremental sync",
+                "value": "/wiki_sync",
+                "id": "cmd-wiki-sync",
+            },
+            {
+                "label": "/wiki_save_ver — Save wiki version",
+                "value": "/wiki_save_ver",
+                "id": "cmd-wiki-save-ver",
+            },
+            {
+                "label": "/wiki_auto_link — Auto cross-link",
+                "value": "/wiki_auto_link",
+                "id": "cmd-wiki-auto-link",
+            },
+            {
+                "label": "/wiki_ascii   — ASCII graph render",
+                "value": "/wiki_ascii",
+                "id": "cmd-wiki-ascii",
+            },
+            {
+                "label": "/wiki_mermaid — Mermaid graph render",
+                "value": "/wiki_mermaid",
+                "id": "cmd-wiki-mermaid",
+            },
+            {
+                "label": "/wiki_hotspots — High-risk entities",
+                "value": "/wiki_hotspots",
+                "id": "cmd-wiki-hotspots",
+            },
+            {
+                "label": "/wiki_cross_links — Cross-project links",
+                "value": "/wiki_cross_links",
+                "id": "cmd-wiki-cross-links",
+            },
+            {
+                "label": "/wiki_index   — Index/catalog",
+                "value": "/wiki_index",
+                "id": "cmd-wiki-index",
+            },
+            {
+                "label": "/wiki_ingest  — Ingest file/conversation",
+                "value": "/wiki_ingest",
+                "id": "cmd-wiki-ingest",
+            },
         ]
         if not filter_text:
             return commands
@@ -569,8 +634,53 @@ class NoManTUI(App):
                 self._notify_with_output("Usage: /wiki_search <query>", "warning")
                 return True
             return self._run_wiki_command("wiki_search_pages", {"query": query})
-        if task == "/wiki_lint":
+         if task == "/wiki_lint":
             return self._run_wiki_command("wiki_lint", {})
+        if task == "/wiki_query":
+            query = task[len("/wiki_query"):].strip()
+            if not query:
+                self._notify_with_output("Usage: /wiki_query <entity_id>", "warning")
+                return True
+            return self._run_wiki_command("wiki_query_graph", {"entity_id": query})
+        if task.startswith("/wiki_pages"):
+            page_id = task[len("/wiki_pages"):].strip()
+            if not page_id:
+                self._notify_with_output("Usage: /wiki_pages <page_id>", "warning")
+                return True
+            return self._run_wiki_command("wiki_get_page", {"page_id": page_id})
+        if task == "/wiki_semantic":
+            query = task[len("/wiki_semantic"):].strip()
+            if not query:
+                self._notify_with_output("Usage: /wiki_semantic <query>", "warning")
+                return True
+            return self._run_wiki_command("wiki_semantic_search", {"query": query})
+        if task == "/wiki_dedup":
+            return self._run_wiki_command("wiki_dedup", {})
+        if task == "/wiki_sync":
+            return self._run_wiki_command("wiki_sync", {})
+        if task.startswith("/wiki_save_ver"):
+            version_name = task[len("/wiki_save_ver"):].strip() or "default"
+            return self._run_wiki_command("wiki_save_version", {"name": version_name})
+        if task == "/wiki_auto_link":
+            return self._run_wiki_command("wiki_auto_link", {})
+        if task == "/wiki_ascii":
+            entity_id = task[len("/wiki_ascii"):].strip() or None
+            return self._run_wiki_command("wiki_enhanced_ascii", {"entity_id": entity_id} if entity_id else {})
+        if task == "/wiki_mermaid":
+            entity_id = task[len("/wiki_mermaid"):].strip() or None
+            return self._run_wiki_command("wiki_enhanced_mermaid", {"entity_id": entity_id} if entity_id else {})
+        if task == "/wiki_hotspots":
+            return self._run_wiki_command("wiki_hotspots", {})
+        if task == "/wiki_cross_links":
+            return self._run_wiki_command("wiki_cross_links", {})
+        if task == "/wiki_index":
+            return self._run_wiki_command("wiki_index", {})
+        if task.startswith("/wiki_ingest"):
+            file_path = task[len("/wiki_ingest"):].strip()
+            if not file_path:
+                self._notify_with_output("Usage: /wiki_ingest <file_path>", "warning")
+                return True
+            return self._run_wiki_command("wiki_auto_extract", {"file_path": file_path})
         return False
 
     def _reset_session(self) -> None:

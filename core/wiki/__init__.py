@@ -5,6 +5,7 @@ Three-layer pattern: raw sources (immutable) -> wiki (markdown pages) -> schema 
 """
 
 from core.wiki.graph import (
+    EntityStatus,
     Edge,
     EdgeType,
     Entity,
