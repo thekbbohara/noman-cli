@@ -119,7 +119,7 @@ class MemoryStore:
         try:
             self._conn.execute(
                 "INSERT INTO memories (id, tier, scope, key, value, source_trace_id,"
-                " created_at, updated_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " created_at, updated_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 vals,
             )
         except sqlite3.IntegrityError:

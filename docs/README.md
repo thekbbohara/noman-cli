@@ -1,60 +1,155 @@
-# NoMan CLI — Documentation
+# NoMan CLI
 
-> A model-agnostic agentic coding CLI that handles complex tasks even with a low context window.
+A model-agnostic agentic coding CLI with a Textual-based TUI. NoMan can run tasks autonomously, maintain context across sessions, manage memory, and self-improve over time.
+
+## Installation
+
+```bash
+pip install -e .
+```
+
+Or with uv:
+
+```bash
+uv pip install -e .
+```
 
 ## Quick Start
 
-1. **New to the project?** → Read [`ARCHITECTURE.md`](ARCHITECTURE.md) for system overview
-2. **Ready to implement?** → Read [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) for build order
-3. **Working on a subsystem?** → See [`subsystem/`](subsystem/) for deep-dive docs
-4. **Need reference material?** → See [`appendix/`](appendix/) for glossary, risks, open questions
+### Task Mode
 
-## Document Index
+Run a single task:
 
-### Core Documents
+```bash
+noman "Add error handling to the login module"
+```
 
-| Document | Purpose |
-|----------|---------|
-| [`ARCHITECTURE.md`](ARCHITECTURE.md) | System design, principles, data flow, repository layout |
-| [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) | What to build, in what order, with dependencies |
+### REPL Mode
 
-### Subsystem Deep-Dives
+Interactive session:
 
-| Document | Subsystem | Status |
-|----------|-----------|--------|
-| [`subsystem/context.md`](subsystem/context.md) | Context Management (skeleton, PageRank, JIT) | Ready |
-| [`subsystem/memory.md`](subsystem/memory.md) | Memory System (SQLite, tiered, embeddings) | Ready |
-| [`subsystem/orchestrator.md`](subsystem/orchestrator.md) | Orchestrator (ReAct loop, budget, tools) | Ready |
-| [`subsystem/tools.md`](subsystem/tools.md) | Tool Bus (registry, sandbox, execution) | Ready |
+```bash
+noman
+```
 
-### Appendix
+### Doctor
 
-| Document | Purpose |
-|----------|---------|
-| [`appendix/glossary.md`](appendix/glossary.md) | Terminology and definitions |
-| [`appendix/risk_analysis.md`](appendix/risk_analysis.md) | Technical, product, and ecosystem risks |
-| [`appendix/open_questions.md`](appendix/open_questions.md) | Unresolved design decisions |
+Check configuration and connectivity:
 
-## Design Principles
+```bash
+noman doctor
+```
 
-1. **Context Frugality** — Operates efficiently within 4K–32K token windows
-2. **Persistent Memory** — Learns continuously via SQLite-backed tiered memory
-3. **Self-Improvement** — Autonomously rewrites prompts, heuristics, and skills
-4. **Conflict-Free Updates** — Three-region layout (`core/`, `overlay/`, `user/`) prevents merge conflicts
+## Commands
 
-## Repository Layout
+| Command | Description |
+|---------|-------------|
+| `noman <task>` | Run a task (default mode) |
+| `noman` | Start REPL/TUI session |
+| `noman doctor` | Health check: config, providers, memory |
+| `noman init` | Scaffold `.noman/` directory with config template |
+| `noman review [file] [-n N]` | Show git diffs (file or last N commits) |
+| `noman rollback [-n N] [-l] [--to ID]` | List or restore previous self-modifications |
+| `noman memory list [-t tier] [-s scope]` | List memory entries |
+| `noman memory get <tier> <scope> <key>` | Get a memory entry |
+| `noman memory set <tier> <scope> <key> <value>` | Store a memory entry |
+| `noman memory delete <tier> <scope> <key>` | Delete a memory entry |
+| `noman skill list` | List all skills |
+| `noman skill get <name>` | Get skill content |
+| `noman skill set <name> <content>` | Set skill content |
+| `noman skill add <name> <file>` | Add skill from file |
+| `noman stats` | Show execution statistics |
+| `noman emergency stop` | Emergency stop all agent operations |
+| `noman --help` | Show help |
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `-p, --provider <name>` | Override provider |
+| `-m, --max-calls <N>` | Max tool calls per turn |
+| `--debug` | Enable debug logging |
+| `--version` | Show version |
+
+## Configuration
+
+Run `noman init` to create `~/.noman/config.toml`, or create it manually:
+
+```toml
+[model]
+default = "claude"
+token_budget = 8000
+
+[[providers]]
+id = "claude"
+type = "anthropic"
+api_key = "${ANTHROPIC_API_KEY}"
+model = "claude-sonnet-4-20250514"
+
+[[providers]]
+id = "openai"
+type = "openai"
+api_key = "${OPENAI_API_KEY}"
+model = "gpt-4o"
+```
+
+### Provider Types
+
+| Type | Compatible With |
+|------|----------------|
+| `openai` | OpenAI, Ollama, Groq, Azure OpenAI |
+| `anthropic` | Anthropic Claude |
+
+### Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `ANTHROPIC_API_KEY` | Anthropic API key |
+| `OPENAI_API_KEY` | OpenAI API key |
+| `NOMAN_DEBUG` | Set to "1" for debug logging |
+| `NOMAN_EMERGENCY_STOP` | Set to "1" to halt agent operations |
+
+## Architecture
+
+- **Orchestrator**: ReAct loop with tool execution, budget guard, session persistence
+- **Adapters**: OpenAI-compatible and Anthropic providers with role-based routing
+- **Memory**: SQLite-backed tiered storage (episodic, semantic, procedural)
+- **Context**: Skeleton maps with centrality scoring, JIT loading
+- **Tools**: 35+ tools (file ops, git, search, docker, etc.)
+- **Security**: Filesystem sandbox, network sandbox, tool signing
+- **Self-Improvement**: Trace critic, meta-agent, rollback manager
+- **TUI**: Textual-based REPL with diff view, model switching, history
+
+## Testing
+
+```bash
+python -m pytest tests/ -v
+```
+
+## Directory Structure
 
 ```
 noman-cli/
-├── docs/              ← You are here
-├── core/              ← Immutable agent code
-├── overlay/           ← Agent-writable (self-modifications)
-├── user/              ← User config and plugins
-├── .noman/            ← Runtime data (never tracked)
-├── tests/             ← Test suites
-└── cli/               ← CLI entrypoint
+├── cli/                    # CLI entry point, parser, TUI
+│   ├── main.py             # Entry point with all commands
+│   ├── parser.py           # Argument parser
+│   ├── tui.py              # Textual TUI app
+│   └── config_validator.py # Config validation
+├── core/
+│   ├── adapters/           # Model providers (OpenAI, Anthropic)
+│   ├── context/            # Context management
+│   ├── errors/             # Error hierarchy, circuit breakers
+│   ├── memory/             # Memory system
+│   ├── orchestrator/       # ReAct loop orchestrator
+│   ├── security/           # Sandboxing, signing
+│   ├── selfimprove/        # Self-improvement system
+│   ├── tools/              # Tool bus + tool handlers
+│   └── utils/              # Utilities (retry, rate limiter, etc.)
+├── docs/                   # Documentation
+├── tests/                  # Test suite
+│   ├── unit/               # Unit tests
+│   ├── adversarial/        # Injection tests
+│   └── chaos/              # Failure mode tests
+├── pyproject.toml
+└── user/config.toml        # User config template
 ```
-
----
-
-*For implementation status and security considerations, see [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md).*

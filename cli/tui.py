@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import re
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
 
@@ -151,6 +152,15 @@ class NoManTUI(App):
         task = input_widget.value.strip()
         if not task:
             return
+        
+        # Handle special commands
+        if task == "/reset":
+            if self._orchestrator:
+                self._orchestrator.reset_session()
+                input_widget.value = ""
+                self.notify("Session reset", severity="info")
+            return
+        
         input_widget.value = ""
         asyncio.create_task(self.run_task(task))
 
@@ -250,7 +260,7 @@ class NoManTUI(App):
         if not content.strip():
             self.notify("Nothing to save", severity="warning")
             return
-        session_dir = Path.home() / ".noman" / "session"
+        session_dir = Path.home() / ".noman" / "sessions"
         session_dir.mkdir(exist_ok=True)
         from datetime import datetime
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -259,26 +269,20 @@ class NoManTUI(App):
         self.notify(f"Saved to {file_path}", severity="info")
 
     def write_history(self, text: str) -> None:
-        session_dir = Path.home() / ".noman" / "session"
+        session_dir = Path.home() / ".noman" / "sessions"
         session_dir.mkdir(exist_ok=True)
 
-        # Save to session file with timestamp
-        from datetime import datetime
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        session_file = session_dir / f"{timestamp}.md"
+        # Append to active session file instead of creating new timestamped files
+        session_file = session_dir / "active_session.md"
 
-        # Build session content - append if exists
         prev = session_file.read_text() if session_file.exists() else ""
 
-        session_count = sum(1 for _ in session_dir.glob("*.md"))
-        content = f"# Session {session_count + 1}\n\n"
-        content += f"**Time:** {datetime.now().isoformat()}\n\n"
-        content += "---\n\n"
-
-        if prev:
-            content = prev.rstrip() + f"\n> {text}\n"
+        if not prev:
+            content = f"# Active Session\n\n**Started:** {datetime.now().isoformat()}\n\n---\n\n"
         else:
-            content += f"> {text}\n"
+            content = prev.rstrip()
+
+        content += f"\n---\n\n> {text}\n"
 
         session_file.write_text(content + "\n")
 

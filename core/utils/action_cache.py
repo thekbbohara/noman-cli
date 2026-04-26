@@ -22,6 +22,7 @@ class ActionCache:
     """In-memory cache for tool call results."""
 
     _store: dict[str, Any] = field(default_factory=dict, repr=False)
+    _tool_keys: dict[str, set[str]] = field(default_factory=dict, repr=False)
     hits: int = field(default=0, repr=False)
     misses: int = field(default=0, repr=False)
 
@@ -39,13 +40,14 @@ class ActionCache:
         """Store *result* for *tool* call."""
         key = _make_key(tool, args, kwargs or {})
         self._store[key] = result
+        self._tool_keys.setdefault(tool, set()).add(key)
         logger.debug("ActionCache SET: %s", tool)
 
     def invalidate(self, tool: str) -> None:
         """Drop all entries for *tool*."""
-        to_drop = [k for k in self._store if k.startswith(tool)]
+        to_drop = self._tool_keys.pop(tool, set())
         for k in to_drop:
-            del self._store[k]
+            self._store.pop(k, None)
         logger.debug("ActionCache INVALIDATE: %s (%s entries)", tool, len(to_drop))
 
     def clear(self) -> None:

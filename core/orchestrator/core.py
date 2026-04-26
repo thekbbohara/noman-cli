@@ -7,6 +7,7 @@ import logging
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 from core.adapters import BaseAdapter, Message
@@ -104,28 +105,24 @@ Workflow per turn:
     ) -> tuple[list[Message], list[ToolDefinition]]:
         messages: list[Message] = []
 
-        # Load conversation history
-        history = self._load_history()
-        history_len = len(history) if history else 0
-        if history:
-            history_msg = f"Previous conversation:\n{history}\n\n---"
-            messages.append(Message(role="system", content=history_msg))
-
+        # 1. System prompt (always first)
         messages.append(Message(role="system", content=self.SYSTEM_PROMPT))
 
-        # Calculate remaining budget accounting for history
-        remaining = budget - len(self.SYSTEM_PROMPT) - history_len
-        for turn in session.turns[-5:]:
+        # 2. Convert session.turns into messages (last 10 turns = 5 user/assistant pairs)
+        recent_turns = session.turns[-10:]  # 10 turns max to avoid token overflow
+        for turn in recent_turns:
+            # User input
+            messages.append(Message(role="user", content=turn.user_input))
+            # Assistant output (if any)
             if turn.assistant_output:
                 messages.append(Message(role="assistant", content=turn.assistant_output))
-                remaining -= len(turn.assistant_output)
+            # Tool results (if any)
             for result in turn.tool_results:
                 messages.append(Message(role="user", content=f"Result: {result}"))
-                remaining -= len(result)
-            if remaining < 1000:
-                break
 
+        # 3. Current task
         messages.append(Message(role="user", content=task))
+
         return messages, self._build_tool_defs()
 
     def _build_tool_defs(self) -> list[ToolDefinition]:
@@ -177,6 +174,9 @@ class Orchestrator:
             retryable_exceptions=(ConnectionError, TimeoutError),
         ))
         self._context_tokens: int | None = None
+        
+        # Restore session from disk if it exists
+        self._load_session()
 
     async def _probe_context_tokens(self) -> int:
         """Probe adapter for context window size."""
@@ -218,12 +218,89 @@ class Orchestrator:
             self._save_debug(messages)
 
     async def run(self, task: str) -> str:
-        self._current_session = Session(id=self._new_session_id())
+        # Load latest session from disk before processing
+        self._load_session()
+        
+        # Reuse existing session or create new one
+        if self._current_session is None:
+            self._current_session = Session(id=self._new_session_id())
+            logger.info("Created new session %s", self._current_session.id)
+        
         turn = Turn(user_input=task)
         response = await self._execute_turn_with_tools(task)
         turn.assistant_output = response
         self._current_session.turns.append(turn)
+        
+        # Persist session to disk
+        self._save_session()
+        
         return response
+
+    def reset_session(self) -> None:
+        """Reset the current session. Call from TUI on /reset command."""
+        self._current_session = None
+        # Remove persisted session file
+        session_dir = Path.home() / ".noman" / "sessions"
+        if session_dir.exists():
+            for f in session_dir.glob("*.json"):
+                f.unlink()
+        logger.info("Session reset and disk files cleared")
+
+    def _get_session_path(self) -> Path:
+        """Get the session file path in current dir."""
+        session_dir = Path.home() / ".noman" / "sessions"
+        session_dir.mkdir(parents=True, exist_ok=True)
+        return session_dir / "active_session.json"
+
+    def _save_session(self) -> None:
+        """Persist current session to disk."""
+        if not self._current_session:
+            return
+        session_path = self._get_session_path()
+        turns_data = [
+            {
+                "user_input": t.user_input,
+                "assistant_output": t.assistant_output,
+                "tool_calls": t.tool_calls,
+                "tool_results": t.tool_results,
+                "tokens_used": t.tokens_used,
+            }
+            for t in self._current_session.turns
+        ]
+        data = {
+            "id": self._current_session.id,
+            "turns": turns_data,
+            "total_tokens": self._current_session.total_tokens,
+            "created_at": self._current_session.created_at,
+        }
+        session_path.write_text(json.dumps(data, indent=2))
+
+    def _load_session(self) -> None:
+        """Restore session from disk if it exists."""
+        session_path = self._get_session_path()
+        if not session_path.exists():
+            return
+        try:
+            data = json.loads(session_path.read_text())
+            turns = [
+                Turn(
+                    user_input=t["user_input"],
+                    assistant_output=t.get("assistant_output", ""),
+                    tool_calls=t.get("tool_calls", []),
+                    tool_results=t.get("tool_results", []),
+                    tokens_used=t.get("tokens_used", 0),
+                )
+                for t in data["turns"]
+            ]
+            self._current_session = Session(
+                id=data["id"],
+                turns=turns,
+                total_tokens=data.get("total_tokens", 0),
+                created_at=data.get("created_at", 0.0),
+            )
+            logger.info("Loaded session with %d turns", len(turns))
+        except Exception as e:
+            logger.error("Failed to load session: %s", e)
 
     async def _execute_turn_with_tools(self, task: str) -> str:
         if self._context_tokens is None:

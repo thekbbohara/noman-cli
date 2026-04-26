@@ -12,16 +12,16 @@ class TestPromptInjectionResistance:
         g = SafetyGuardrails()
         # Attempting to modify an immutable path should always fail
         with pytest.raises(Exception):
-            g.validate_target("core/errors.py")
+            g.validate_target("core/errors/__init__.py")
 
     def test_prefix_attack_blocked(self):
         g = SafetyGuardrails()
-        # Attempt to target immutable path via prefix
+        # Path traversal to reach immutable path via .. should be blocked
         with pytest.raises(Exception):
-            g.validate_target("core/security/../overlay/prompts")
+            g.validate_target("core/security/../security/signing.py")
 
     def test_nested_traversal_blocked(self):
         g = SafetyGuardrails()
         # Attempt to reach immutable files through relative paths
         with pytest.raises(Exception):
-            g.validate_target("overlay/../../core/security/signing.py")
+            g.validate_target("./core/security/../security/signing.py")

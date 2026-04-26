@@ -39,8 +39,13 @@ class SafetyGuardrails:
 
     def validate_target(self, target: str) -> None:
         """Raise SelfModificationError if *target* is immutable."""
+        import os
+
+        normalized = os.path.normpath(target)
         for forbidden in self.immutable_paths:
-            if forbidden in target:
+            norm_forbidden = os.path.normpath(forbidden)
+            # Exact match or the forbidden path is a parent directory
+            if normalized == norm_forbidden or normalized.startswith(norm_forbidden + os.sep):
                 raise SelfModificationError(
                     f"Target '{target}' is in immutable path '{forbidden}'"
                 )
