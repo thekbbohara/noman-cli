@@ -112,7 +112,7 @@ class NoManTUI(App):
             yield TrackedRichLog(id="output", markup=True, wrap=True)
             # Command palette (hidden by default)
             with Container(id="command-palette"):
-                yield Static("[bold]Commands:[/bold]", style="bold")
+                yield Static("[bold]Commands:[/bold]")
                 yield Static("  /reset       - Reset current session", id="cmd-reset")
                 yield Static("  /diff        - Show file edits (Ctrl+D)", id="cmd-diff")
                 yield Static("  /save        - Save output to file (Ctrl+S)", id="cmd-save")
