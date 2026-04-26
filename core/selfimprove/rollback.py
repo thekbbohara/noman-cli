@@ -59,11 +59,14 @@ def _compute_checksum(filepath: str | Path) -> str:
 
 
 def _read_file_content(filepath: str | Path) -> str:
-    """Read a file's text content; return '' if missing."""
+    """Read a file's text content; return '' if missing or binary."""
     p = Path(filepath)
     if not p.exists():
         return ""
-    return p.read_text(encoding="utf-8")
+    try:
+        return p.read_text(encoding="utf-8")
+    except (UnicodeDecodeError, PermissionError):
+        return ""
 
 
 class RollbackManager:

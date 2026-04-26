@@ -17,9 +17,15 @@ from core.selfimprove.meta_agent import (
     MetaAgent,
 )
 from core.selfimprove.rollback import RollbackManager
+from core.selfimprove.executor import ChangeExecutor, ExecutionResult
+from core.selfimprove.change_tracker import ChangeTracker
+from core.selfimprove.diff_preview import format_diff
 
 __all__ = [
     "ChangeType",
+    "ChangeExecutor",
+    "ChangeTracker",
+    "ExecutionResult",
     "ImprovementProposal",
     "ImprovementResult",
     "MetaAgent",
@@ -27,4 +33,5 @@ __all__ = [
     "TraceCritic",
     "TraceScore",
     "create_critic",
+    "format_diff",
 ]
