@@ -615,9 +615,9 @@ class NoManTUI(App):
                 def _on_done(fut):
                     try:
                         result = fut.result()
-                        self.call_next(lambda: output.write(f"[bold]Result:[/bold]\n{result}"))
-                    except Exception as e:
-                        self.call_next(lambda: output.write(f"[red]Error: {e}[/red]"))
+                        self.call_next(lambda r=result: output.write(f"[bold]Result:[/bold]\n{r}"))
+                    except Exception as err:
+                        self.call_next(lambda e=err: output.write(f"[red]Error: {e}[/red]"))
                     self.call_next(self.update_status)
 
                 future.add_done_callback(_on_done)
@@ -626,12 +626,12 @@ class NoManTUI(App):
                 import threading
                 def _run():
                     result = asyncio.run(self._orchestrator.tool_bus.execute(tool_name, args))
-                    self.call_next(lambda: output.write(f"[bold]Result:[/bold]\n{result}"))
+                    self.call_next(lambda r=result: output.write(f"[bold]Result:[/bold]\n{r}"))
                     self.call_next(self.update_status)
                 t = threading.Thread(target=_run, daemon=True)
                 t.start()
-        except Exception as e:
-            output.write(f"[red]Error running command: {e}[/red]")
+        except Exception as exc:
+            output.write(f"[red]Error running command: {exc}[/red]")
             self.call_next(self.update_status)
         return True
 
