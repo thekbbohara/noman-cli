@@ -154,6 +154,12 @@ class MetaAgent:
                 violations.append(f"Proposal '{proposal.proposal_id}' rejected: {exc}")
                 logger.debug("Guardrail rejection: %s", exc)
 
+        # Check for skill-worthy traces
+        if score.skill_suggestion_score >= 0.7:
+            skill_id = self._propose_skill_creation(trace, score)
+            if skill_id:
+                logger.info("Skill draft queued: %s", skill_id)
+
         return ImprovementResult(proposals=validated, guardrail_violations=violations)
 
     def propose_for_file(
@@ -376,6 +382,111 @@ class MetaAgent:
             )
 
         return proposals
+
+    def _propose_skill_creation(self, trace: dict[str, Any], score: TraceScore) -> str | None:
+        """
+        Propose a skill creation as a draft in the skill queue.
+
+        Returns draft_id if created, None if skipped (duplicate or score too low).
+        """
+        from core.selfimprove.skill_queue import SkillQueue
+
+        # Skip if score is below threshold
+        if score.skill_suggestion_score < 0.7:
+            return None
+
+        # Generate skill name from trace
+        skill_name = self._infer_skill_name(trace)
+
+        # Check against existing skills to avoid duplicates
+        queue = SkillQueue()
+        for existing in queue.list_pending():
+            if existing.name == skill_name:
+                logger.info("Skipping duplicate skill draft: %s", skill_name)
+                return None
+
+        # Extract steps from trace
+        steps = self._extract_steps_from_trace(trace)
+        pitfalls = self._extract_pitfalls_from_trace(trace)
+
+        # Generate SKILL.md content
+        content = self._generate_skill_md(skill_name, steps, pitfalls, score)
+
+        # Add to queue as draft
+        queue.add_draft(
+            name=skill_name,
+            description=f"Auto-detected from trace (score: {score.skill_suggestion_score:.2f})",
+            content=content,
+            trigger_reason=f"Skill worthiness score: {score.skill_suggestion_score:.2f}",
+            score=score.skill_suggestion_score,
+        )
+
+        return f"Draft created for '{skill_name}' (score: {score.skill_suggestion_score:.2f})"
+
+    def _infer_skill_name(self, trace: dict[str, Any]) -> str:
+        """Infer a skill name from trace context."""
+        turns = trace.get("turns", [])
+        # Look for task descriptions or tool names that indicate the skill's purpose
+        for turn in turns:
+            if isinstance(turn, dict):
+                result = turn.get("result", "")
+                if isinstance(result, str) and len(result) > 10:
+                    # Extract first meaningful phrase
+                    words = result.split()[:5]
+                    name = "_".join(w.lower().strip(".,!?") for w in words if w.isalnum())
+                    if len(name) > 5:
+                        return f"skill_{name}"
+        return f"skill_trace_{len(turns)}steps"
+
+    def _extract_steps_from_trace(self, trace: dict[str, Any]) -> list[str]:
+        """Extract key steps from trace tool calls."""
+        steps = []
+        tool_calls = trace.get("tool_calls", [])
+        for i, tc in enumerate(tool_calls[:10]):  # Limit to first 10
+            if isinstance(tc, dict):
+                tool = tc.get("tool", tc.get("name", "unknown"))
+                args = tc.get("args", {})
+                arg_str = ", ".join(f"{k}={v}" for k, v in list(args.items())[:3])
+                steps.append(f"Call {tool}({arg_str})")
+        return steps if steps else ["Multiple tool calls executed"]
+
+    def _extract_pitfalls_from_trace(self, trace: dict[str, Any]) -> list[str]:
+        """Extract pitfalls/errors from trace."""
+        pitfalls = []
+        errors = trace.get("errors", [])
+        for err in errors[:5]:
+            if isinstance(err, dict):
+                msg = err.get("message", str(err))
+                pitfalls.append(f"- {msg}")
+        return pitfalls if pitfalls else ["None detected"]
+
+    def _generate_skill_md(
+        self,
+        name: str,
+        steps: list[str],
+        pitfalls: list[str],
+        score: TraceScore,
+    ) -> str:
+        """Generate SKILL.md content from trace data."""
+        return f"""---
+name: {name}
+description: Auto-detected skill (score: {score.skill_suggestion_score:.2f})
+---
+# {name.replace('skill_', '').title().replace('_', ' ')}
+
+## Trigger
+Auto-detected from trace analysis — load when facing similar patterns.
+
+## Steps
+{chr(10).join(f'{i+1}. {step}' for i, step in enumerate(steps))}
+
+## Pitfalls
+{chr(10).join(pitfalls)}
+
+## Notes
+- Generated automatically by MetaAgent
+- Review before using — may need refinement
+"""
 
     # ------------------------------------------------------------------
     # Validation

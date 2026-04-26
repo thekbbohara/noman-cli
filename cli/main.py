@@ -592,6 +592,47 @@ def _cmd_skill_add(name: str, file_path: str) -> int:
     return 0
 
 
+def _cmd_skill_review() -> int:
+    """Review pending skill drafts."""
+    from core.selfimprove.skill_queue import SkillQueue
+    queue = SkillQueue()
+    drafts = queue.list_pending()
+
+    if not drafts:
+        print("No pending skill drafts.")
+        return 0
+
+    print(f"=== Pending Skill Drafts ({len(drafts)}) ===\n")
+    for i, draft in enumerate(drafts, 1):
+        print(f"[{i}] {draft.name}")
+        print(f"    Score: {draft.score:.2f}")
+        print(f"    Reason: {draft.trigger_reason}")
+        print(f"    Content:\n{draft.content}")
+        print(f"    Draft ID: {draft.draft_id}")
+        print()
+
+    print("Commands: noman skill approve <draft_id> | noman skill discard <draft_id>")
+    return 0
+
+
+def _cmd_skill_approve(draft_id: str) -> int:
+    """Approve a skill draft."""
+    from core.selfimprove.skill_queue import SkillQueue
+    queue = SkillQueue()
+    success, msg = queue.approve(draft_id)
+    print(msg)
+    return 0 if success else 1
+
+
+def _cmd_skill_discard(draft_id: str) -> int:
+    """Discard a skill draft."""
+    from core.selfimprove.skill_queue import SkillQueue
+    queue = SkillQueue()
+    success, msg = queue.discard(draft_id)
+    print(msg)
+    return 0 if success else 1
+
+
 def _cmd_stats(noman_dir: Path | None = None) -> int:
     """Show execution stats."""
     if noman_dir is None:
@@ -921,6 +962,20 @@ def main(argv=None):
                 print("Usage: noman skill add <name> <file>")
                 return 1
             return _cmd_skill_add(name, file_path)
+        elif subcmd == "review":
+            return _cmd_skill_review()
+        elif subcmd == "approve":
+            draft_id = getattr(args, 'draft_id', None)
+            if not draft_id:
+                print("Usage: noman skill approve <draft_id>")
+                return 1
+            return _cmd_skill_approve(draft_id)
+        elif subcmd == "discard":
+            draft_id = getattr(args, 'draft_id', None)
+            if not draft_id:
+                print("Usage: noman skill discard <draft_id>")
+                return 1
+            return _cmd_skill_discard(draft_id)
         return 1
 
     if args.command == "stats":

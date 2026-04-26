@@ -20,6 +20,7 @@ from core.selfimprove.rollback import RollbackManager
 from core.selfimprove.executor import ChangeExecutor, ExecutionResult
 from core.selfimprove.change_tracker import ChangeTracker
 from core.selfimprove.diff_preview import format_diff
+from core.selfimprove.skill_queue import SkillQueue, SkillDraft
 
 __all__ = [
     "ChangeType",
@@ -30,6 +31,8 @@ __all__ = [
     "ImprovementResult",
     "MetaAgent",
     "RollbackManager",
+    "SkillDraft",
+    "SkillQueue",
     "TraceCritic",
     "TraceScore",
     "create_critic",

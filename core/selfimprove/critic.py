@@ -28,6 +28,7 @@ class TraceScore:
     efficiency: float = 0.0
     correctness: float = 0.0
     cost: float = 0.0
+    skill_suggestion_score: float = 0.0  # 0.0-1.0, how worthy is a skill draft
     strengths: list[str] = field(default_factory=list)
     weaknesses: list[str] = field(default_factory=list)
     suggestions: list[str] = field(default_factory=list)
@@ -110,6 +111,7 @@ class TraceCritic:
         efficiency = self._score_efficiency(stats)
         correctness = self._score_correctness(stats, trace)
         cost = self._score_cost(stats)
+        skill_suggestion = self._score_skill_suggestion(stats, trace)
 
         overall = (efficiency + correctness + cost) / 3.0
 
@@ -124,6 +126,7 @@ class TraceCritic:
             efficiency=round(efficiency, 1),
             correctness=round(correctness, 1),
             cost=round(cost, 1),
+            skill_suggestion_score=round(skill_suggestion, 2),
             strengths=strengths,
             weaknesses=weaknesses,
             suggestions=suggestions,
@@ -242,11 +245,68 @@ class TraceCritic:
         elif tokens > 10000:
             score -= min(10.0, (tokens - 10000) / 5000.0)
 
-        # Penalize excessive retries (wasted cost).
+         # Penalize excessive retries (wasted cost).
         if stats.retries > 0:
             score -= stats.retries * 3.0
 
         return max(0.0, min(100.0, score))
+
+    def _score_skill_suggestion(self, stats: _TraceStats, trace: dict[str, Any]) -> float:
+        """
+        Score how worthy a skill draft would be (0.0-1.0).
+
+        Signals:
+        - User corrections: +0.4 (strongest signal)
+        - Error overcome: +0.3
+        - Iterative fix loop: +0.3
+        - Complexity (tool diversity): +0.2
+        - Penalty: low score if no friction signals
+        """
+        score = 0.0
+
+        # Signal 1: User corrections (strongest signal)
+        # Look for turns where result indicates user feedback
+        turns = trace.get("turns", [])
+        has_user_correction = False
+        for turn in turns:
+            if isinstance(turn, dict):
+                result = turn.get("result", "")
+                if isinstance(result, str):
+                    lower = result.lower()
+                    if any(w in lower for w in ["user", "correction", "fix", "change", "instead", "try", "note"]):
+                        has_user_correction = True
+                        break
+
+        if has_user_correction:
+            score += 0.4
+
+        # Signal 2: Errors overcome (task succeeded despite errors)
+        if stats.errors > 0:
+            # Check if the trace eventually succeeded (not all turns errored)
+            success_turns = [
+                t for t in turns
+                if isinstance(t, dict) and t.get("result", "")
+                and not any(w in str(t.get("result", "")).lower() for w in ["error", "failed", "exception"])
+            ]
+            if success_turns:
+                score += 0.3
+
+        # Signal 3: Iterative fix loop (retries)
+        if stats.retries > 0:
+            score += 0.3 * min(1.0, stats.retries / 3.0)  # Cap at 0.3
+
+        # Signal 4: Complexity (tool diversity)
+        unique_tools = len(set(tc.get("tool", tc.get("name", "")) for tc in trace.get("tool_calls", [])))
+        if unique_tools >= 5:
+            score += 0.2 * min(1.0, unique_tools / 10.0)
+
+        # Signal 5: Multi-step (many turns)
+        if stats.total_turns > 10:
+            score += 0.1 * min(1.0, (stats.total_turns - 10) / 10.0)
+
+        # Normalize to 0.0-1.0
+        return max(0.0, min(1.0, score))
+
 
     def _build_feedback(
         self,
