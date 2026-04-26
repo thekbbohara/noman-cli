@@ -6,15 +6,16 @@ import asyncio
 import re
 from dataclasses import dataclass
 from datetime import datetime
+from difflib import unified_diff
 from enum import Enum
 from pathlib import Path
 
+from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal
 from textual.events import Key
 from textual.reactive import reactive
-from textual.scroll_view import ScrollView
-from textual.widgets import Input, RichLog, Static
+from textual.widgets import DataTable, Input, Label, RichLog, Static
 
 from core.tools import EDIT_HISTORY
 
@@ -63,12 +64,12 @@ class NoManTUI(App):
     #output { height: 100%; border: none; background: transparent; color: $text; overflow-y: auto; }
     #input-area { dock: bottom; height: 5; background: transparent; }
     #input { width: 100%; background: transparent; }
+
     #command-palette {
-        dock: top;
+        dock: bottom;
         height: 10;
-        width: 80%;
-        max-width: 70;
-        margin-top: -4;
+        width: 70;
+        margin-bottom: 6;
         background: $surface;
         color: $text;
         border: solid $accent;
@@ -78,25 +79,22 @@ class NoManTUI(App):
     #command-palette.visible {
         display: block;
     }
-    #command-palette .palette-title {
+    #palette-title {
         text-align: center;
         width: 100%;
     }
-    #command-list {
+    #command-table {
         height: 100%;
     }
-    .command-item {
-        margin: 0;
-        padding: 0 1;
-        height: 2;
-        width: 100%;
+    #command-table > DataTable {
+        border: none;
     }
-    .command-item:hover, .command-item.selected {
+    #command-table > DataTable.row:hover {
+        background: $accent 20%;
+    }
+    #command-table > DataTable.row:focus {
         background: $accent;
         color: $text;
-    }
-    .command-item.hidden {
-        display: none;
     }
     """
 
@@ -106,6 +104,7 @@ class NoManTUI(App):
         ("ctrl+d", "diff_view", "Diff"),
         ("ctrl+s", "save_output", "Save Output"),
         ("f2", "switch_model", "Model"),
+        ("/", "toggle_palette", "Commands"),
     ]
 
     _orchestrator = None
@@ -115,6 +114,7 @@ class NoManTUI(App):
     _expanded = False
     _output_buffer: str = ""
     CLIPBOARD_READ_COMMAND: str | None = ""
+
     # Command palette state
     _command_palette_open = False
     _filtered_commands: list[dict] = []
@@ -133,20 +133,14 @@ class NoManTUI(App):
             yield TrackedRichLog(id="output", markup=True, wrap=True)
             # Command palette (hidden by default, floats above input)
             with Container(id="command-palette"):
-                yield Static("[dim]type to filter[/dim]", classes="palette-title")
-                yield ScrollView(
-                    Container(
-                        Static("/reset       — Reset current session", id="cmd-reset", classes="command-item"),
-                        Static("/diff        — Show file edits (Ctrl+D)", id="cmd-diff", classes="command-item"),
-                        Static("/save        — Save output to file (Ctrl+S)", id="cmd-save", classes="command-item"),
-                        Static("/model       — Switch provider (F2)", id="cmd-model", classes="command-item"),
-                        Static("/help        — Show this help", id="cmd-help", classes="command-item"),
-                        Static("/exit        — Exit NoMan", id="cmd-exit", classes="command-item"),
-                    ),
-                    id="command-scroll"
-                )
+                yield Label("[dim]type to filter[/dim]", id="palette-title")
+                yield DataTable(id="command-table")
             with Horizontal(id="input-area"):
-                yield Input(placeholder="Enter task... (type / for commands)", id="input", valid_empty=False)
+                yield Input(
+                    placeholder="Enter task... (type / for commands)",
+                    id="input",
+                    valid_empty=False,
+                )
 
     def on_mount(self) -> None:
         self.update_status()
@@ -164,57 +158,89 @@ class NoManTUI(App):
         # Log available tools on startup
         if self._orchestrator:
             tools = self._orchestrator.tool_bus.list_tools()
-            print(f"[LOG] Loaded {len(tools)} tools: {', '.join(tools[:10])}{'...' if len(tools) > 10 else ''}")
+            tool_list = ', '.join(tools[:10])
+            suffix = '...' if len(tools) > 10 else ''
+            print(f"[LOG] Loaded {len(tools)} tools: {tool_list}{suffix}")
 
-    def _build_command_list(self, filter_text: str) -> list[dict]:
+    # ── Command palette ──────────────────────────────────────────────
+
+    def action_toggle_palette(self) -> None:
+        """Show/hide the command palette."""
+        if self._command_palette_open:
+            self._hide_command_palette()
+        else:
+            self._show_command_palette()
+
+    def _build_command_list(self, filter_text: str = "") -> list[dict]:
         """Build the list of available commands, optionally filtered."""
         commands = [
-            {"label": "/reset       — Reset current session", "value": "/reset", "id": "cmd-reset"},
-            {"label": "/diff        — Show file edits (Ctrl+D)", "value": "/diff", "id": "cmd-diff"},
-            {"label": "/save        — Save output to file (Ctrl+S)", "value": "/save", "id": "cmd-save"},
-            {"label": "/model       — Switch provider (F2)", "value": "/model", "id": "cmd-model"},
-            {"label": "/help        — Show this help", "value": "/help", "id": "cmd-help"},
-            {"label": "/exit        — Exit NoMan", "value": "/exit", "id": "cmd-exit"},
+            {
+                "label": "/reset       — Reset current session",
+                "value": "/reset",
+                "id": "cmd-reset",
+            },
+            {
+                "label": "/diff        — Show file edits (Ctrl+D)",
+                "value": "/diff",
+                "id": "cmd-diff",
+            },
+            {
+                "label": "/save        — Save output to file (Ctrl+S)",
+                "value": "/save",
+                "id": "cmd-save",
+            },
+            {
+                "label": "/model       — Switch provider (F2)",
+                "value": "/model",
+                "id": "cmd-model",
+            },
+            {
+                "label": "/help        — Show this help",
+                "value": "/help",
+                "id": "cmd-help",
+            },
+            {
+                "label": "/exit        — Exit NoMan",
+                "value": "/exit",
+                "id": "cmd-exit",
+            },
         ]
         if not filter_text:
             return commands
         lower = filter_text.lower()
         return [c for c in commands if lower in c["label"].lower() or lower in c["value"].lower()]
 
-    def _filter_palette(self, filter_text: str) -> None:
-        """Show/hide command items based on filter text."""
-        if not filter_text:
-            # Show all items
-            for item in self.query("#command-list .command-item"):
-                item.remove_class("hidden")
-            return
-        lower = filter_text.lower()
-        for item in self.query("#command-list .command-item"):
-            if isinstance(item, Static):
-                renderable = getattr(item, "renderable", None)
-                if renderable and hasattr(renderable, "plain"):
-                    match = lower in renderable.plain.lower()
-                else:
-                    match = False
-                if match:
-                    item.remove_class("hidden")
-                else:
-                    item.add_class("hidden")
-            else:
-                item.remove_class("hidden")
+    def _populate_table(self, commands: list[dict]) -> None:
+        """Populate the DataTable with command rows."""
+        table = self.query_one("#command-table", DataTable)
+        table.clear(columns=True)
+        table.cursor_type = "row"
+        table.add_columns("Command", "Description")
+        for i, cmd in enumerate(commands):
+            label = cmd["label"].split("—")[0].strip()
+            desc = cmd["label"].split("—")[1].strip() if "—" in cmd["label"] else ""
+            table.add_row(label, desc, key=str(i))
+        self._filtered_commands = commands
+        self._selected_index = 0
+        if commands:
+            table.focus()
+            from textual.coordinate import Coordinate
+            table.cursor_coordinate = Coordinate(0, 0)
 
-    def _show_command_palette(self, input_value: str = "") -> None:
-        """Show the command palette above the input area; keep input focused."""
+    def _filter_palette(self, filter_text: str = "") -> None:
+        """Filter and re-populate the command table."""
+        commands = self._build_command_list(filter_text)
+        self._populate_table(commands)
+
+    def _show_command_palette(self, filter_text: str = "") -> None:
+        """Show the command palette above the input area."""
         if self._command_palette_open:
-            # Refresh filter if input changed
-            self._filter_palette(input_value)
+            self._filter_palette(filter_text)
             return
         self._command_palette_open = True
         palette = self.query_one("#command-palette", Container)
         palette.add_class("visible")
-        self._filter_palette(input_value)
-        # Keep input focused so user can keep typing to filter
-        self.call_after_refresh(lambda: self.query_one("#input", Input).focus())
+        self._filter_palette(filter_text)
 
     def _hide_command_palette(self) -> None:
         """Hide the command palette."""
@@ -223,39 +249,66 @@ class NoManTUI(App):
         palette.remove_class("visible")
         self.query_one("#input", Input).focus()
 
-    def _load_session(self, content: str) -> None:
-        """Load session content into the output log."""
-        output = self.query_one("#output", TrackedRichLog)
-        output.clear()
-        lines = content.split("\n")
-        in_history = False
-        for line in lines:
-            if line.startswith("# Active Session"):
-                in_history = True
-                output.write(f"[dim]# Session started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}[/dim]\n")
-                continue
-            if in_history and line.startswith("> "):
-                session_text = line[2:]
-                if session_text.startswith("❯ "):
-                    output.write(f"\n[b]{session_text}[/b]\n")
-                elif session_text.strip():
-                    output.write(f"{session_text}\n")
-            elif in_history and line.strip() and not line.startswith("---") and not line.startswith("#") and not line.startswith(">"):
-                output.write(f"{line}\n")
+    def _execute_command(self, cmd: str) -> None:
+        """Execute a command from the palette and close it."""
+        self._hide_command_palette()
+        input_widget = self.query_one("#input", Input)
+        input_widget.value = cmd
+        input_widget.focus()
 
-    def _update_session_status(self) -> None:
-        """Update status bar to show session state."""
-        status = self.query_one("#status", Static)
-        if self._session_file.exists():
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        """Handle row selection in the command table."""
+        if not self._command_palette_open:
+            return
+        row_key = event.row_key
+        if row_key is not None and row_key.value is not None:
             try:
-                content = self._session_file.read_text()
-                task_count = content.count("❯ ")
-                size_kb = self._session_file.stat().st_size / 1024
-                status.update(f"Turn {self._metrics.turn_count} | {task_count} tasks | {size_kb:.1f}KB")
-            except Exception:
-                status.update(f"Turn {self._metrics.turn_count} | session loaded")
-        else:
-            status.update(f"Turn {self._metrics.turn_count} | new session")
+                idx = int(row_key.value)
+                if 0 <= idx < len(self._filtered_commands):
+                    cmd = self._filtered_commands[idx]["value"]
+                    self._execute_command(cmd)
+            except (ValueError, TypeError):
+                pass
+
+    def on_key(self, event: Key) -> None:
+        """Handle keyboard events for palette navigation."""
+        if not self._command_palette_open:
+            return
+
+        table = self.query_one("#command-table", DataTable)
+        from textual.coordinate import Coordinate
+
+        # ArrowDown — move selection down
+        if event.key == "arrow_down":
+            if self._filtered_commands:
+                new_idx = min(self._selected_index + 1, len(self._filtered_commands) - 1)
+                self._selected_index = new_idx
+                table.cursor_coordinate = Coordinate(new_idx, 0)
+                event.stop()
+                return
+
+        # ArrowUp — move selection up
+        if event.key == "arrow_up":
+            if self._filtered_commands:
+                new_idx = max(self._selected_index - 1, 0)
+                self._selected_index = new_idx
+                table.cursor_coordinate = Coordinate(new_idx, 0)
+                event.stop()
+                return
+
+        # Enter — execute selected command
+        if event.key == "enter":
+            if self._filtered_commands and self._selected_index < len(self._filtered_commands):
+                cmd = self._filtered_commands[self._selected_index]["value"]
+                self._execute_command(cmd)
+                event.stop()
+                return
+
+        # Escape — close palette
+        if event.key == "escape":
+            self._hide_command_palette()
+            event.stop()
+            return
 
     def on_input_changed(self, event: Input.Changed) -> None:
         """Show/hide command palette when user types in the input field."""
@@ -269,134 +322,54 @@ class NoManTUI(App):
             self._hide_command_palette()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        """Hide command palette on Enter, then submit the input."""
-        self._hide_command_palette()
+        """Handle Enter in the input field."""
+        if self._command_palette_open:
+            # Let the palette handle Enter via on_data_table_row_selected
+            return
         self.action_submit()
 
-    def on_key(self, event: Key) -> None:
-        if event.key == "enter":
-            self.action_submit()
-        elif event.key == "escape":
-            self._hide_command_palette()
+    # ── Session management ───────────────────────────────────────────
 
-    def _on_click(self, event) -> None:
-        """Handle clicks on command palette items."""
-        if not hasattr(event, "node"):
-            return
-        node = event.node
-        if node and hasattr(node, "id") and node.id and node.id.startswith("cmd-"):
-            cmd_map = {
-                "cmd-reset": "/reset",
-                "cmd-diff": "/diff",
-                "cmd-save": "/save",
-                "cmd-model": "/model",
-                "cmd-help": "/help",
-                "cmd-exit": "/exit",
-            }
-            cmd = cmd_map.get(node.id)
-            if cmd:
-                self._hide_command_palette()
-                input_widget = self.query_one("#input", Input)
-                input_widget.value = cmd
-                input_widget.focus()
-
-    def _handle_command(self, task: str) -> bool:
-        """Handle special commands. Returns True if command was handled."""
-        input_widget = self.query_one("#input", Input)
-
-        if task == "/reset":
-            self._reset_session()
-            return True
-
-        if task == "/diff":
-            self.action_diff_view()
-            return True
-
-        if task == "/save":
-            self.action_save_output()
-            return True
-
-        if task == "/model":
-            self.action_switch_model()
-            return True
-
-        if task == "/help":
-            self._show_command_palette()
-            return True
-
-        if task == "/exit":
-            self.exit()
-            return True
-
-        return False
-
-    def _reset_session(self) -> None:
-        """Reset the current session — clear orchestrator, output, and session file."""
-        if self._orchestrator:
-            self._orchestrator.reset_session()
-
-        # Clear the output log
+    def _load_session(self, content: str) -> None:
+        """Load session content into the output log."""
         output = self.query_one("#output", TrackedRichLog)
         output.clear()
+        lines = content.split("\n")
+        in_history = False
+        for line in lines:
+            if line.startswith("# Active Session"):
+                in_history = True
+                ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                output.write(f"[dim]# Session started: {ts}[/dim]\n")
+                continue
+            if in_history and line.startswith("> "):
+                session_text = line[2:]
+                if session_text.startswith("❯ "):
+                    output.write(f"\n[b]{session_text}[/b]\n")
+                elif session_text.strip():
+                    output.write(f"{session_text}\n")
+            elif (in_history and line.strip()
+                    and not line.startswith("---")
+                    and not line.startswith("#")
+                    and not line.startswith(">")):
+                output.write(f"{line}\n")
 
-        # Clear the active session file
+    def _update_session_status(self) -> None:
+        """Update status bar to show session state."""
+        status = self.query_one("#status", Static)
         if self._session_file.exists():
             try:
-                self._session_file.unlink()
+                content = self._session_file.read_text()
+                task_count = content.count("❯ ")
+                size_kb = self._session_file.stat().st_size / 1024
+                turn = self._metrics.turn_count
+                status.update(f"Turn {turn} | {task_count} tasks | {size_kb:.1f}KB")
             except Exception:
-                pass
+                status.update(f"Turn {self._metrics.turn_count} | session loaded")
+        else:
+            status.update(f"Turn {self._metrics.turn_count} | new session")
 
-        # Reset metrics
-        self._metrics.turn_count = 0
-        self._metrics.state = TUIState.IDLE
-        self.update_status()
-        self.notify("Session reset", severity="information")
-
-    def _convert_markdown_to_textual(self, text: str) -> list:
-        """Convert markdown to Rich Text objects."""
-        from rich.text import Text
-
-        lines = []
-        in_code = False
-
-        for line in text.split("\n"):
-            if line.strip().startswith("```"):
-                if in_code:
-                    lines.append(Text("─" * 40, style="dim"))
-                else:
-                    lines.append(Text("─" * 40, style="dim"))
-                in_code = not in_code
-                continue
-
-            if in_code:
-                lines.append(Text(line, style="cyan"))
-                continue
-
-            if line.startswith("# "):
-                lines.append(Text(line[2:].strip(), style="bold"))
-                continue
-            elif line.startswith("## "):
-                lines.append(Text(line[3:].strip(), style="bold"))
-                continue
-            elif line.startswith("### "):
-                lines.append(Text(line[4:].strip(), style="bold"))
-                continue
-
-            stripped = line.strip()
-            if stripped.startswith(("- ", "* ", "+ ")):
-                item = stripped[2:].strip()
-                item = re.sub(r"\*\*(.+?)\*\*", r"[b]\1[/b]", item)
-                item = re.sub(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", r"[i]\1[/i]", item)
-                lines.append(Text.from_markup(f"  • {item}"))
-                continue
-            elif "**" in line:
-                line = re.sub(r"\*\*(.+?)\*\*", r"[b]\1[/b]", line)
-                lines.append(Text.from_markup(line))
-                continue
-            else:
-                lines.append(Text(line))
-
-        return lines
+    # ── Actions ──────────────────────────────────────────────────────
 
     def action_submit(self) -> None:
         input_widget = self.query_one("#input", Input)
@@ -421,7 +394,6 @@ class NoManTUI(App):
     def action_expand(self) -> None:
         self._expanded = not self._expanded
         output = self.query_one("#output", TrackedRichLog)
-        # Don't clear, just toggle wrap mode for long content
         if self._expanded:
             output.wrap = True
         else:
@@ -430,9 +402,6 @@ class NoManTUI(App):
     def action_diff_view(self) -> None:
         output = self.query_one("#output", TrackedRichLog)
         output.clear()
-        from difflib import unified_diff
-
-        from rich.text import Text
 
         if not EDIT_HISTORY:
             output.write("[yellow]No file edits yet[/yellow]")
@@ -506,29 +475,94 @@ class NoManTUI(App):
             return
         session_dir = Path.home() / ".noman" / "sessions"
         session_dir.mkdir(exist_ok=True)
-        from datetime import datetime
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         file_path = session_dir / f"output_{ts}.txt"
         file_path.write_text(content)
         self.notify(f"Saved to {file_path}", severity="information")
 
-    def write_history(self, text: str) -> None:
-        session_dir = Path.home() / ".noman" / "sessions"
-        session_dir.mkdir(exist_ok=True)
+    def _handle_command(self, task: str) -> bool:
+        """Handle special commands. Returns True if command was handled."""
+        if task == "/reset":
+            self._reset_session()
+            return True
+        if task == "/diff":
+            self.action_diff_view()
+            return True
+        if task == "/save":
+            self.action_save_output()
+            return True
+        if task == "/model":
+            self.action_switch_model()
+            return True
+        if task == "/help":
+            self._show_command_palette()
+            return True
+        if task == "/exit":
+            self.exit()
+            return True
+        return False
 
-        # Append to active session file instead of creating new timestamped files
-        session_file = session_dir / "active_session.md"
+    def _reset_session(self) -> None:
+        """Reset the current session — clear orchestrator, output, and session file."""
+        if self._orchestrator:
+            self._orchestrator.reset_session()
 
-        prev = session_file.read_text() if session_file.exists() else ""
+        output = self.query_one("#output", TrackedRichLog)
+        output.clear()
 
-        if not prev:
-            content = f"# Active Session\n\n**Started:** {datetime.now().isoformat()}\n\n---\n\n"
-        else:
-            content = prev.rstrip()
+        if self._session_file.exists():
+            try:
+                self._session_file.unlink()
+            except Exception:
+                pass
 
-        content += f"\n---\n\n> {text}\n"
+        self._metrics.turn_count = 0
+        self._metrics.state = TUIState.IDLE
+        self.update_status()
+        self.notify("Session reset", severity="information")
 
-        session_file.write_text(content + "\n")
+    def _convert_markdown_to_textual(self, text: str) -> list:
+        """Convert markdown to Rich Text objects."""
+        from rich.text import Text
+
+        lines = []
+        in_code = False
+
+        for line in text.split("\n"):
+            if line.strip().startswith("```"):
+                lines.append(Text("─" * 40, style="dim"))
+                in_code = not in_code
+                continue
+
+            if in_code:
+                lines.append(Text(line, style="cyan"))
+                continue
+
+            if line.startswith("# "):
+                lines.append(Text(line[2:].strip(), style="bold"))
+                continue
+            elif line.startswith("## "):
+                lines.append(Text(line[3:].strip(), style="bold"))
+                continue
+            elif line.startswith("### "):
+                lines.append(Text(line[4:].strip(), style="bold"))
+                continue
+
+            stripped = line.strip()
+            if stripped.startswith(("- ", "* ", "+ ")):
+                item = stripped[2:].strip()
+                item = re.sub(r"\*\*(.+?)\*\*", r"[b]\1[/b]", item)
+                item = re.sub(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", r"[i]\1[/i]", item)
+                lines.append(Text.from_markup(f"  • {item}"))
+                continue
+            elif "**" in line:
+                line = re.sub(r"\*\*(.+?)\*\*", r"[b]\1[/b]", line)
+                lines.append(Text.from_markup(line))
+                continue
+            else:
+                lines.append(Text(line))
+
+        return lines
 
     async def run_task(self, task: str) -> None:
         try:
@@ -537,7 +571,6 @@ class NoManTUI(App):
             self.call_next(self.hide_input)
 
             output = self.query_one("#output", TrackedRichLog)
-            # Append task prompt instead of clearing — keeps full session history
             output.write(f"\n[b]❯ {task}[/b]\n")
 
             self._metrics.state = TUIState.RUNNING
@@ -548,7 +581,6 @@ class NoManTUI(App):
                 self._last_result_full = result
                 self._last_task = task
 
-                # Show full response — no truncation
                 lines = self._convert_markdown_to_textual(result)
                 for line in lines:
                     output.write(line)
