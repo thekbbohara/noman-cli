@@ -70,9 +70,9 @@ class NoManTUI(App):
         height: 10;
         width: 70;
         margin-bottom: 6;
-        background: $surface;
+        background: transparent;
         color: $text;
-        border: solid $accent;
+        border: none;
         padding: 1 2;
         display: none;
     }
