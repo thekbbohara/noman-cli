@@ -50,9 +50,9 @@ class TrackedRichLog(RichLog):
         self.content += markup + "\n"
         super().write_markup(markup, style)  # type: ignore[misc]
 
-    def clear(self, scroll_end: bool | None = None) -> RichLog:  # type: ignore[override]
+    def clear(self) -> RichLog:
         self.content = ""
-        return super().clear(scroll_end)  # type: ignore[call-arg]
+        super().clear()
 
 
 class NoManTUI(App):
