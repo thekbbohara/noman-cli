@@ -80,6 +80,7 @@ class NoManTUI(App):
     def __init__(self, orchestrator=None, **kwargs):
         super().__init__(**kwargs)
         self._orchestrator = orchestrator
+        self._session_file = Path.home() / ".noman" / "sessions" / "active_session.md"
 
     def compose(self) -> ComposeResult:
         with Container():
@@ -92,10 +93,59 @@ class NoManTUI(App):
     def on_mount(self) -> None:
         self.update_status()
         self.query_one("#input", Input).focus()
+
+        # Load last session if it exists
+        if self._session_file.exists():
+            try:
+                content = self._session_file.read_text()
+                if content.strip():
+                    self._load_session(content)
+                    self.call_next(self._update_session_status)
+            except Exception:
+                pass
+
         # Log available tools on startup
         if self._orchestrator:
             tools = self._orchestrator.tool_bus.list_tools()
             print(f"[LOG] Loaded {len(tools)} tools: {', '.join(tools[:10])}{'...' if len(tools) > 10 else ''}")
+
+    def _load_session(self, content: str) -> None:
+        """Load session content into the output log."""
+        output = self.query_one("#output", TrackedRichLog)
+        output.clear()
+        # Strip the header/metadata, show only task history
+        lines = content.split("\n")
+        in_history = False
+        for line in lines:
+            if line.startswith("# Active Session"):
+                in_history = True
+                output.write(f"[dim]# Session started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}[/dim]\n")
+                continue
+            if in_history and line.startswith("> "):
+                # Extract the task and result
+                session_text = line[2:]  # Remove "> "
+                if session_text.startswith("❯ "):
+                    output.write(f"\n[b]{session_text}[/b]\n")
+                elif session_text.strip():
+                    output.write(f"{session_text}\n")
+            elif in_history and line.strip() and not line.startswith("---") and not line.startswith("#") and not line.startswith(">"):
+                # Non-empty line that's not a separator or header
+                output.write(f"{line}\n")
+
+    def _update_session_status(self) -> None:
+        """Update status bar to show session state."""
+        status = self.query_one("#status", Static)
+        if self._session_file.exists():
+            try:
+                content = self._session_file.read_text()
+                # Count tasks in session
+                task_count = content.count("❯ ")
+                size_kb = self._session_file.stat().st_size / 1024
+                status.update(f"Turn {self._metrics.turn_count} | {task_count} tasks | {size_kb:.1f}KB")
+            except Exception:
+                status.update(f"Turn {self._metrics.turn_count} | session loaded")
+        else:
+            status.update(f"Turn {self._metrics.turn_count} | new session")
 
     def on_key(self, event: Key) -> None:
         if event.key == "enter":
@@ -324,13 +374,31 @@ class NoManTUI(App):
         status = self.query_one("#status", Static)
         m = self._metrics
         if m.state == TUIState.IDLE:
-            status.update("NoMan v0.0.01")
+            if self._session_file.exists():
+                try:
+                    content = self._session_file.read_text()
+                    task_count = content.count("❯ ")
+                    size_kb = self._session_file.stat().st_size / 1024
+                    status.update(f"Turn {m.turn_count} | {task_count} tasks | {size_kb:.1f}KB")
+                except Exception:
+                    status.update("NoMan v0.0.01 | session loaded")
+            else:
+                status.update("NoMan v0.0.01 | new session")
         elif m.state == TUIState.INITIALIZING:
             status.update("Initializing...")
         elif m.state == TUIState.RUNNING:
             status.update(f"Turn {m.turn_count + 1} | running")
         elif m.state == TUIState.COMPLETE:
-            status.update(f"Turn {m.turn_count} | complete")
+            if self._session_file.exists():
+                try:
+                    content = self._session_file.read_text()
+                    task_count = content.count("❯ ")
+                    size_kb = self._session_file.stat().st_size / 1024
+                    status.update(f"Turn {m.turn_count} | {task_count} tasks | {size_kb:.1f}KB")
+                except Exception:
+                    status.update(f"Turn {m.turn_count} | complete")
+            else:
+                status.update(f"Turn {m.turn_count} | complete")
         elif m.state == TUIState.ERROR:
             status.update(f"Turn {m.turn_count} | error")
 
