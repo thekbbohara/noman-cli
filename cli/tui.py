@@ -58,6 +58,29 @@ class NoManTUI(App):
     #output { height: 100%; border: none; background: transparent; color: $text; overflow-y: auto; }
     #input-area { dock: bottom; height: 3; background: transparent; }
     #input { width: 100%; background: transparent; }
+    #command-palette {
+        dock: top;
+        height: 15;
+        width: 60;
+        background: $surface;
+        color: $text;
+        border: solid $accent;
+        padding: 1;
+        margin-top: 1;
+        display: none;
+    }
+    #command-palette.visible {
+        display: block;
+    }
+    .command-item {
+        margin: 0;
+        padding: 0 1;
+        height: 2;
+    }
+    .command-item:hover {
+        background: $accent;
+        color: $text;
+    }
     """
 
     BINDINGS = [
@@ -87,12 +110,23 @@ class NoManTUI(App):
             with Horizontal(id="header"):
                 yield Static("NoMan v0.0.01", id="status")
             yield TrackedRichLog(id="output", markup=True, wrap=True)
+            # Command palette (hidden by default)
+            with Container(id="command-palette"):
+                yield Static("[bold]Commands:[/bold]", style="bold")
+                yield Static("  /reset       - Reset current session", id="cmd-reset")
+                yield Static("  /diff        - Show file edits (Ctrl+D)", id="cmd-diff")
+                yield Static("  /save        - Save output to file (Ctrl+S)", id="cmd-save")
+                yield Static("  /model       - Switch provider (F2)", id="cmd-model")
+                yield Static("  /help        - Show this help", id="cmd-help")
+                yield Static("  /exit        - Exit NoMan", id="cmd-exit")
             with Horizontal(id="input-area"):
-                yield Input(placeholder="Enter task...", id="input", valid_empty=False)
+                yield Input(placeholder="Enter task... (type / for commands)", id="input", valid_empty=False)
 
     def on_mount(self) -> None:
         self.update_status()
         self.query_one("#input", Input).focus()
+        # Watch for / command in input
+        self.watch(self.query_one("#input", Input), "value", self._on_input_change)
 
         # Load last session if it exists
         if self._session_file.exists():
@@ -108,6 +142,13 @@ class NoManTUI(App):
         if self._orchestrator:
             tools = self._orchestrator.tool_bus.list_tools()
             print(f"[LOG] Loaded {len(tools)} tools: {', '.join(tools[:10])}{'...' if len(tools) > 10 else ''}")
+
+    def _on_input_change(self, old: str, new: str) -> None:
+        """Show command palette when / is typed."""
+        if new.strip().startswith("/"):
+            self._show_command_palette()
+        else:
+            self._hide_command_palette()
 
     def _load_session(self, content: str) -> None:
         """Load session content into the output log."""
@@ -150,6 +191,92 @@ class NoManTUI(App):
     def on_key(self, event: Key) -> None:
         if event.key == "enter":
             self.action_submit()
+        elif event.key == "escape":
+            self._hide_command_palette()
+
+    def _show_command_palette(self) -> None:
+        """Show the command palette at the top of the screen."""
+        palette = self.query_one("#command-palette", Container)
+        palette.add_class("visible")
+        self.query_one("#input", Input).blur()
+
+    def _hide_command_palette(self) -> None:
+        """Hide the command palette."""
+        palette = self.query_one("#command-palette", Container)
+        palette.remove_class("visible")
+
+    def _on_click(self, event) -> None:
+        """Handle clicks on command palette items."""
+        if not hasattr(event, "node"):
+            return
+        node = event.node
+        if node and hasattr(node, "id"):
+            cmd_map = {
+                "cmd-reset": "/reset",
+                "cmd-diff": "/diff",
+                "cmd-save": "/save",
+                "cmd-model": "/model",
+                "cmd-help": "/help",
+                "cmd-exit": "/exit",
+            }
+            cmd = cmd_map.get(node.id)
+            if cmd:
+                self._hide_command_palette()
+                input_widget = self.query_one("#input", Input)
+                input_widget.value = cmd
+                self.call_after_refresh(lambda: input_widget.focus())
+
+    def _handle_command(self, task: str) -> bool:
+        """Handle special commands. Returns True if command was handled."""
+        input_widget = self.query_one("#input", Input)
+        
+        if task == "/reset":
+            self._reset_session()
+            return True
+        
+        if task == "/diff":
+            self.action_diff_view()
+            return True
+        
+        if task == "/save":
+            self.action_save_output()
+            return True
+        
+        if task == "/model":
+            self.action_switch_model()
+            return True
+        
+        if task == "/help":
+            self._show_command_palette()
+            return True
+        
+        if task == "/exit":
+            self.exit()
+            return True
+        
+        return False
+
+    def _reset_session(self) -> None:
+        """Reset the current session — clear orchestrator, output, and session file."""
+        if self._orchestrator:
+            self._orchestrator.reset_session()
+        
+        # Clear the output log
+        output = self.query_one("#output", TrackedRichLog)
+        output.clear()
+        
+        # Clear the active session file
+        if self._session_file.exists():
+            try:
+                self._session_file.unlink()
+            except Exception:
+                pass
+        
+        # Reset metrics
+        self._metrics.turn_count = 0
+        self._metrics.state = TUIState.IDLE
+        self.update_status()
+        self.notify("Session reset", severity="info")
 
     def _convert_markdown_to_textual(self, text: str) -> list:
         """Convert markdown to Rich Text objects."""
@@ -204,12 +331,10 @@ class NoManTUI(App):
             return
         
         # Handle special commands
-        if task == "/reset":
-            if self._orchestrator:
-                self._orchestrator.reset_session()
+        if task.startswith("/"):
+            if self._handle_command(task):
                 input_widget.value = ""
-                self.notify("Session reset", severity="info")
-            return
+                return
         
         input_widget.value = ""
         asyncio.create_task(self.run_task(task))
