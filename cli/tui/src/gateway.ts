@@ -1,4 +1,4 @@
-import { spawn } from "child_process";
+import { spawn, ChildProcess } from "child_process";
 
 interface Session {
   id: string;
@@ -7,7 +7,7 @@ interface Session {
 }
 
 export class GatewayClient {
-  private proc: ReturnType<spawn>;
+  private proc: ChildProcess;
 
   constructor() {
     this.proc = spawn("python3", ["-m", "cli.tui_gateway.server"], {
@@ -15,12 +15,12 @@ export class GatewayClient {
     });
   }
 
-  async call(method: string, params?: object): Promise<unknown> {
+  async call(method: string, params?: Record<string, unknown>): Promise<unknown> {
     const request = { method, params, id: Date.now() };
     this.proc.stdin!.write(JSON.stringify(request) + "\n");
 
     return new Promise((resolve, reject) => {
-      this.proc.stdout!.once("data", (data) => {
+      this.proc.stdout!.once("data", (data: Buffer) => {
         try {
           const response = JSON.parse(data.toString());
           resolve(response.result);
