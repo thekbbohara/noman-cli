@@ -57,22 +57,50 @@ class TrackedRichLog(RichLog):
 
 class NoManTUI(App):
     CSS = """
-    Screen { background: transparent; }
-    App { background: transparent; }
-    #header { dock: top; height: 3; background: transparent; color: $text; }
-    #status { width: 100%; content-align: center middle; }
-    #output { height: 100%; border: none; background: transparent; color: $text; overflow-y: auto; allow-select: true; }
-    #input-area { dock: bottom; height: 5; background: transparent; }
-    #input { width: 100%; background: transparent; }
+    /* Claude Code inspired theme */
+    Screen { background: $surface; }
+    App { background: $surface; }
+    
+    #header { 
+        dock: top; 
+        height: 3; 
+        background: $surface; 
+        color: $text;
+        border-bottom: solid $accent;
+    }
+    #status { 
+        width: 100%; 
+        content-align: center middle; 
+        color: $accent;
+    }
+    #output { 
+        height: 100%; 
+        border: none; 
+        background: $surface; 
+        color: $text; 
+        overflow-y: auto; 
+        allow-select: true;
+    }
+    #input-area { 
+        dock: bottom; 
+        height: 5; 
+        background: $surface;
+        border-top: solid $accent;
+    }
+    #input { 
+        width: 100%; 
+        background: $surface;
+        color: $text;
+    }
 
     #command-palette {
         dock: bottom;
         height: 10;
         width: 70;
         margin-bottom: 6;
-        background: transparent;
+        background: $surface;
         color: $text;
-        border: none;
+        border: solid $accent;
         padding: 1 2;
         display: none;
     }
@@ -130,7 +158,7 @@ class NoManTUI(App):
     def compose(self) -> ComposeResult:
         with Container():
             with Horizontal(id="header"):
-                yield Static("NoMan v0.0.01", id="status")
+                yield Static("● NoMan", id="status")
             yield TrackedRichLog(id="output", markup=True, wrap=True, allow_select=True)
             # Command palette (hidden by default, floats above input)
             with Container(id="command-palette"):
@@ -138,7 +166,7 @@ class NoManTUI(App):
                 yield DataTable(id="command-table")
             with Horizontal(id="input-area"):
                 yield Input(
-                    placeholder="Enter task... (type / for commands)",
+                    placeholder="What would you like to do?",
                     id="input",
                     valid_empty=False,
                 )
