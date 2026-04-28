@@ -101,24 +101,22 @@ TOKEN-SAVING FORMAT (always prefer):
 - Lean refs: `[tool 1] arg` not `ToolName(arg=value)` full form
 - Skip summaries: omit link destinations, label quotes, filler politeness
 
-RESPONSE (two forms):
+RESPONSE (single format):
 
-1. With tools — staging + _____tool block:
-tool_name arg1 value1
-arg2 value2
+Tool call — staging + _____tool block:
+tool_name arg1=value1 arg2=value2
 
-2. Final — plain answer or just "Done."
+Final — plain answer or just "Done."
 
-No JSON. No tool_calls field. _____tool separator forces tool call.
-Omit staging for quick calls. Use "Done." for completion.
+_____tool separator triggers tool call. Use "Done." for completion.
 
 Available: {tools_list}{wiki_info}
 
 Workflow:
 1. REASON - think
-2. ACT - execute
-3. OBSERVE - process
-4. FINAL - set is_final_result: true when done"""
+2. ACT - call tool via _____tool block
+3. OBSERVE - process result
+4. FINAL - respond "Done." when complete"""
 
     def _count_tokens(self, text: str) -> int:
         """Estimate token count (rough ~4 chars per token)."""
@@ -461,8 +459,8 @@ class Orchestrator:
 
     def _parse_response(
         self, raw_content: str, api_tool_calls: list,
-) -> tuple[bool, str, list]:
-        """Parse response: staging+tool block or JSON with short keys."""
+    ) -> tuple[bool, str, list]:
+        """Parse _____tool format only (most token-efficient)."""
         TOOL_SEPARATOR = "_____tool"
         
         if not raw_content:
@@ -470,21 +468,7 @@ class Orchestrator:
 
         raw = raw_content.strip()
 
-        # Try JSON first (supports both c/t/f and full keys)
-        if raw.startswith("{"):
-            try:
-                parsed = json.loads(raw)
-                if isinstance(parsed, dict):
-                    is_final = bool(parsed.get("f", parsed.get("is_final_result", True)))
-                    content = parsed.get("c", parsed.get("content", "")) or ""
-                    calls = api_tool_calls or parsed.get("t", parsed.get("tool_calls", []))
-                    if is_final and calls:
-                        is_final = False
-                    return is_final, content, _flatten_tool_calls(calls)
-            except (json.JSONDecodeError, ValueError):
-                pass
-
-        # Check for _____tool block: staging -> separator -> tool calls
+        # Check for _____tool block
         if TOOL_SEPARATOR in raw:
             lines = raw.split("\n")
             tool_calls = []
@@ -496,7 +480,6 @@ class Orchestrator:
                     in_tool_block = True
                     continue
                 if in_tool_block:
-                    # This is a tool call line
                     parts = line.split()
                     if parts and parts[0]:
                         tool_name = parts[0].strip()
@@ -513,7 +496,7 @@ class Orchestrator:
             if tool_calls:
                 return False, " ".join(staging), tool_calls
 
-        # Plain answer is final if: exact "Done" (short) or starts with "done" and short
+        # Plain answer is final (Done variants)
         short = raw.strip().lower()
         is_final = short in ("done.", "done", "completed", "finished")
         if not is_final:
