@@ -248,19 +248,33 @@ def _chat(rid: Any, params: dict) -> dict:
     return _ok(rid, {"response": result})
 
 
-@method("session.create")
-def _session_create(rid: Any, params: dict) -> dict:
-    """Create a new session."""
-    sid = uuid.uuid4().hex[:8]
-    key = datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:6]
+@method("input.detect_drop")
+def _input_detect_drop(rid: Any, params: dict) -> dict:
+    """Detect drag-and-drop. Always return no drop for now."""
+    return _ok(rid, {"matched": False})
 
-    _sessions[sid] = {
-        "session_key": key,
-        "history": [],
-        "history_lock": threading.Lock(),
-    }
 
-    return _ok(rid, {"session_id": sid, "session_key": key})
+@method("prompt.submit")
+def _prompt_submit(rid: Any, params: dict) -> dict:
+    """Handle prompt submission - route to orchestrator."""
+    text = params.get("text", "")
+    session_id = params.get("session_id", "")
+
+    if not text:
+        return _ok(rid, {"response": "No text provided"})
+
+    try:
+        orch = _get_orchestrator()
+    except Exception as e:
+        return _err(rid, 5001, f"Failed to create orchestrator: {e}")
+
+    try:
+        import asyncio
+        result = asyncio.run(orch.run(text))
+    except Exception as e:
+        return _err(rid, 5002, f"Orchestrator error: {e}")
+
+    return _ok(rid, {"response": result})
 
 
 @method("session.close")
