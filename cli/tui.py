@@ -73,13 +73,12 @@ class NoManTUI(App):
         content-align: center middle; 
         color: $accent;
     }
-    #output { 
+#output { 
         height: 100%; 
         border: none; 
         background: $surface; 
         color: $text; 
         overflow-y: auto; 
-        allow-select: true;
     }
     #input-area { 
         dock: bottom; 
@@ -159,7 +158,7 @@ class NoManTUI(App):
         with Container():
             with Horizontal(id="header"):
                 yield Static("● NoMan", id="status")
-            yield TrackedRichLog(id="output", markup=True, wrap=True, allow_select=True)
+            yield TrackedRichLog(id="output", markup=True, wrap=True)
             # Command palette (hidden by default, floats above input)
             with Container(id="command-palette"):
                 yield Label("[dim]type to filter[/dim]", id="palette-title")
