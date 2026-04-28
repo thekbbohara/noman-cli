@@ -1,4 +1,4 @@
-import { Box, Text, useStdout } from '@noman/ink'
+import { Box, Text, useStdout } from '@hermes/ink'
 
 import { artWidth, caduceus, CADUCEUS_WIDTH, logo, LOGO_WIDTH } from '../banner.js'
 import { flat } from '../lib/text.js'
