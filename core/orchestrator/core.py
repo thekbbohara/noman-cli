@@ -101,15 +101,15 @@ TOKEN-SAVING FORMAT (always prefer):
 - Lean refs: `[tool 1] arg` not `ToolName(arg=value)` full form
 - Skip summaries: omit link destinations, label quotes, filler politeness
 
-RESPONSE format (required):
-- With tools: `{{"content": "", "tool_calls": [...], "is_final_result": false}}`
-- Final answer: `{{"content": "answer", "tool_calls": [], "is_final_result": true}}`
+RESPONSE (JSON, required):
+- with tools: {"c": "", "t": [...], "f": false}
+- final: {"c": "answer", "t": [], "f": true}
 
 RULES:
-- `is_final_result: false` → MUST include tool_calls
-- `is_final_result: true` → content is complete answer, no tool_calls
-- NEVER finalize while tools remain to call
-- Call tools to check, search, read, verify — don't assume
+- f:false → MUST have t
+- f:true → complete answer, no t
+- NEVER finalize with tools left
+- Call verify—don't assume
 
 Available: {tools_list}{wiki_info}
 
@@ -421,9 +421,8 @@ class Orchestrator:
                 messages.append(Message(
                     role="user",
                     content=(
-                        "ERROR: is_final_result: false but no tool_calls returned. "
-                        "Call the necessary tool(s), then respond with is_final_result: true "
-                        "when you have the complete answer."
+                        "ERROR: f:false but no t. "
+                        "Call tool(s), then respond with f:true when done."
                     ),
                 ))
                 continue
@@ -462,7 +461,7 @@ class Orchestrator:
     def _parse_response(
         self, raw_content: str, api_tool_calls: list,
     ) -> tuple[bool, str, list]:
-        """Parse is_final_result from model JSON response."""
+        """Parse response with short keys: c=content, t=tool_calls, f=is_final_result."""
         if not raw_content:
             return False, "", api_tool_calls or []
 
@@ -475,10 +474,14 @@ class Orchestrator:
         if not isinstance(parsed, dict):
             return True, raw_content, []
 
-        is_final = bool(parsed.get("is_final_result", True))
-        content = parsed.get("content", "") or ""
-        parsed_calls = api_tool_calls or parsed.get("tool_calls", [])
+        # Support short keys: c=content, t=tool_calls, f=is_final_result
+        is_final = bool(parsed.get("f", parsed.get("is_final_result", True)))
+        content = parsed.get("c", parsed.get("content", "")) or ""
+
+        # Check both "t" and "tool_calls"
+        parsed_calls = api_tool_calls or parsed.get("t", parsed.get("tool_calls", []))
         parsed_calls = _flatten_tool_calls(parsed_calls)
+
         if is_final and parsed_calls:
             is_final = False
         return is_final, content, parsed_calls
