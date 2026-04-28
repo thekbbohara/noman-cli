@@ -513,8 +513,11 @@ class Orchestrator:
             if tool_calls:
                 return False, " ".join(staging), tool_calls
 
-        # Plain answer / "Done." is final
-        is_final = raw.strip() in ("Done.", "done", "Done") or len(raw.strip()) > 20
+        # Plain answer is final if: exact "Done" (short) or starts with "done" and short
+        short = raw.strip().lower()
+        is_final = short in ("done.", "done", "completed", "finished")
+        if not is_final:
+            is_final = len(raw) < 30 and "tool" not in short and short.startswith("done")
         return is_final, raw, []
 
     def _new_session_id(self) -> str:
