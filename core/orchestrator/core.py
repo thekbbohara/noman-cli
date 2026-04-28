@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
@@ -21,6 +22,12 @@ from core.utils.retry import RetryConfig, RetryManager
 from core.wiki import Wiki
 
 logger = logging.getLogger(__name__)
+if os.environ.get("NOMAN_DEBUG"):
+    logging.getLogger().setLevel(logging.DEBUG)
+    handler = logging.StreamHandler()
+    handler.setLevel(logging.DEBUG)
+    logger.addHandler(handler)
+    logger.setLevel(logging.DEBUG)
 
 
 class OrchestratorState(Enum):
@@ -95,28 +102,34 @@ Knowledge graph: {summary['entity_count']} entities, {summary['edge_count']} edg
 
         return f"""You are NoMan, autonomous coding agent.
 
+IMPORTANT RULES:
+- Only call tools when task actually needs file/command execution  
+- After tool result, PROVIDE YOUR ANSWER first, then add "Done." at the end
+- Never respond with just "Done." alone — include your actual answer before it
+
 TOKEN-SAVING FORMAT (always prefer):
 - Plain text over markdown: no headings, bullets, code fences, or speaker labels when possible
 - Short labels: prefer concise over verbose
 - Lean refs: `[tool 1] arg` not `ToolName(arg=value)` full form
 - Skip summaries: omit link destinations, label quotes, filler politeness
 
-RESPONSE (single format):
+RESPONSE FORMAT:
 
 Tool call — staging + _____tool block:
-tool_name arg1=value1 arg2=value2
+tool_name arg1=value1
 
-Final — plain answer or just "Done."
+Final — YOUR ANSWER + "Done."
+Example: "The project has 50 files. Done."
 
-_____tool separator triggers tool call. Use "Done." for completion.
+_____tool separator triggers tool call.
 
 Available: {tools_list}{wiki_info}
 
 Workflow:
 1. REASON - think
-2. ACT - call tool via _____tool block
+2. ACT - call tool if needed
 3. OBSERVE - process result
-4. FINAL - respond "Done." when complete"""
+4. FINAL - give answer + Done."""
 
     def _count_tokens(self, text: str) -> int:
         """Estimate token count (rough ~4 chars per token)."""
@@ -203,7 +216,7 @@ Workflow:
 
 
 class Orchestrator:
-    MAX_TOOL_ITERATIONS = 20  # Hard cap to prevent infinite loops
+    MAX_TOOL_ITERATIONS = 100  # Allow many iterations for complex tasks
 
     def __init__(
         self,
@@ -264,16 +277,21 @@ class Orchestrator:
         except CircuitBreakerOpenError:
             logger.error("Circuit breaker OPEN — adapter unavailable")
             return None
-        except (ConnectionError, TimeoutError, httpx.HTTPError, httpx.TimeoutException):
-            logger.error("Adapter call failed after retries")
+        except (ConnectionError, TimeoutError, httpx.HTTPError, httpx.TimeoutException) as e:
+            logger.error("Adapter call failed after retries: %s", e)
             return None
-        except Exception:
-            logger.exception("Unexpected adapter error")
+        except Exception as e:
+            logger.exception("Unexpected adapter error: %s", e)
             return None
         finally:
             self._save_debug(messages)
 
     async def run(self, task: str) -> str:
+        # Simple inputs that don't need the model
+        simple_greetings = {"hi", "hello", "hey", "hi there", "hello!", "hey!", "hi!", "hi."}
+        if task.lower().strip().rstrip("!").rstrip(".") in simple_greetings:
+            return "Hello! I'm NoMan. What would you like me to help you with?"
+
         # Load latest session from disk before processing
         self._load_session()
 
@@ -370,8 +388,13 @@ class Orchestrator:
         )
 
         consecutive_non_tool_responses = 0
+        last_tool_called = None
+        same_tool_count = 0
+        request_count = 0
         for iteration in range(self.MAX_TOOL_ITERATIONS):
             self._state = OrchestratorState.PLANNING
+            request_count += 1
+            logger.debug(f"Request #{request_count}, iteration={iteration}")
             response = await self._resilient_chat(messages, tool_defs)
             if response is None:
                 return "Sorry, I couldn't reach the AI provider. Check your network and try again."
@@ -386,6 +409,11 @@ class Orchestrator:
 
             # Parse is_final_result from JSON content
             is_final, content, parsed_calls = self._parse_response(raw_content, tool_calls)
+            logger.debug(f"is_final={is_final}, parsed_calls={len(parsed_calls) if parsed_calls else 0}, api_tool_calls={len(tool_calls) if tool_calls else 0}")
+            # If API returns tool_calls but parse found none, use API tool_calls
+            if not parsed_calls and tool_calls:
+                logger.debug("Using API tool_calls directly")
+                parsed_calls = tool_calls
 
             # If plain text (not JSON) after tool results → model gave up
             just_executed_tools = iteration > 0 and any(
@@ -412,6 +440,7 @@ class Orchestrator:
                 continue
 
             if is_final:
+                logger.debug(f"Returning final: content={repr(content[:50] if content else '')}, raw={repr(raw_content[:50] if raw_content else '')}")
                 return content or raw_content
 
             # is_final = false → must have tool_calls
@@ -430,8 +459,8 @@ class Orchestrator:
 
             for tc in parsed_calls:
                 self._state = OrchestratorState.EXECUTING
-                tool_name = tc.get("function", {}).get("name", "")
-                args = tc.get("function", {}).get("arguments", {})
+                tool_name = tc.get("function", {}).get("name", "") or tc.get("tool", "")
+                args = tc.get("function", {}).get("arguments", {}) or tc.get("args", {})
                 if isinstance(args, str):
                     try:
                         args = json.loads(args)
@@ -451,57 +480,149 @@ class Orchestrator:
                         logger.error("Tool %s failed: %s", tool_name, e)
 
                 messages.append(Message(role="assistant", content=raw_content, tool_calls=[tc]))
+                # Summarize large tool results to preserve key info
+                if len(result_str) > 10000:
+                    summarized = self._summarize_result(result_str, tool_name)
+                    logger.info("Summarized %s result: %d -> %d chars", tool_name, len(result_str), len(summarized))
+                    result_str = summarized
                 messages.append(Message(
                     role="user", content=result_str, tool_call_id=tc.get("id", ""),
                 ))
 
+                # Track same-tool repetition
+                if tool_name == last_tool_called:
+                    same_tool_count += 1
+                    if same_tool_count >= 2:
+                        logger.warning("Model repeated tool %s twice, returning last result")
+                        return f"Tool {tool_name} returned: {result_str}"
+                else:
+                    last_tool_called = tool_name
+                    same_tool_count = 0
+
         return raw_content or "Max tool call iterations reached."
+
+    def _summarize_result(self, result: str, tool_name: str) -> str:
+        """Summarize large tool results to preserve key information."""
+        lines = result.strip().split("\n")
+        line_count = len(lines)
+
+        # Summarize by type
+        if tool_name == "get_file_tree":
+            dirs = [l for l in lines if l.endswith("/")]
+            files = [l for l in lines if not l.endswith("/")]
+            return f"Project structure: {len(dirs)} directories, {len(files)} files\nTop directories: {dirs[:10]}\nTop files: {files[:10]}"
+
+        elif tool_name == "search_code":
+            # Count matches and show first few
+            matches = [l for l in lines if ":" in l][:10]
+            return f"Found ~{line_count} matches. First 10:\n" + "\n".join(matches)
+
+        elif tool_name == "list_dir":
+            dirs = [l for l in lines if l.endswith("/")]
+            files = [l for l in lines if not l.endswith("/")]
+            return f"{len(dirs)} dirs, {len(files)} files: {lines[:20]}"
+
+        elif tool_name == "read_file":
+            return f"File has {line_count} lines. First 100 lines:\n" + "\n".join(lines[:100])
+
+        # Generic: show first + last chunks
+        return f"Output: {line_count} lines. First 20:\n" + "\n".join(lines[:20])
 
     def _parse_response(
         self, raw_content: str, api_tool_calls: list,
     ) -> tuple[bool, str, list]:
         """Parse _____tool format only (most token-efficient)."""
-        TOOL_SEPARATOR = "_____tool"
-        
+        # Match any number of underscores (model sometimes uses 6)
+        import re
+        TOOL_PATTERN = re.compile(r'_+tool\b')
+
         if not raw_content:
             return False, "", api_tool_calls or []
 
         raw = raw_content.strip()
 
-        # Check for _____tool block
-        if TOOL_SEPARATOR in raw:
+        # Check for _____tool block (any underscore count)
+        if TOOL_PATTERN.search(raw):
             lines = raw.split("\n")
             tool_calls = []
             staging = []
             in_tool_block = False
+            found_tool_call = False
 
             for line in lines:
-                if line.strip() == TOOL_SEPARATOR:
+                if TOOL_PATTERN.search(line):
                     in_tool_block = True
+                    found_tool_call = True
+                    # If tool call is on same line (e.g., "_____tool list_dir path=.")
+                    # parse it immediately instead of skipping
+                    match = TOOL_PATTERN.search(line)
+                    if match:
+                        rest = line[match.end():].strip()
+                        if rest:
+                            parts = rest.split()
+                            if parts and parts[0]:
+                                tool_name = parts[0].strip()
+                                if tool_name.replace("_", "").replace("-", "").isalnum() and tool_name in self._tools.list_tools():
+                                    args = {}
+                                    for part in parts[1:]:
+                                        if "=" in part:
+                                            k, v = part.split("=", 1)
+                                            args[k] = v
+                                    tool_calls.append({"tool": tool_name, "args": args})
+                                    logger.debug(f"Parsed inline tool: {tool_name} {args}")
+                                    continue
                     continue
                 if in_tool_block:
+                    line = line.strip()
+                    if line in ("f:true", "f:false") or line.startswith("f:") or line.startswith("<"):
+                        continue
                     parts = line.split()
                     if parts and parts[0]:
                         tool_name = parts[0].strip()
+                        if tool_name in ("f:true", "f:false") or tool_name.startswith("f:") or tool_name.startswith("<"):
+                            logger.debug(f"Skipping f: marker: {tool_name}")
+                            continue
+                        if not tool_name.replace("_", "").replace("-", "").isalnum():
+                            logger.debug(f"Skipping non-alnum tool: {tool_name}")
+                            continue
+                        if tool_name not in self._tools.list_tools():
+                            logger.debug(f"Skipping unknown tool: {tool_name}")
+                            continue
                         args = {}
                         for part in parts[1:]:
                             if "=" in part:
                                 k, v = part.split("=", 1)
                                 args[k] = v
-                        if tool_name:
+                        if tool_name and tool_name in self._tools.list_tools():
                             tool_calls.append({"tool": tool_name, "args": args})
+                            found_tool_call = True
                 elif line.strip():
                     staging.append(line.strip())
 
             if tool_calls:
                 return False, " ".join(staging), tool_calls
 
-        # Plain answer is final (Done variants)
+        # Plain answer is final (Done variants, or f:true)
         short = raw.strip().lower()
-        is_final = short in ("done.", "done", "completed", "finished")
+        logger.debug(f"parse_response checking: raw={repr(raw[:100])}, short={repr(short)}")
+        # Check for f:true at end (with possible content before it)
+        is_final = short == "f:true" or short.endswith("\nf:true") or short.endswith(" f:true")
+        if not is_final:
+            is_final = short in ("done.", "done", "completed", "finished")
         if not is_final:
             is_final = len(raw) < 30 and "tool" not in short and short.startswith("done")
-        return is_final, raw, []
+        # Extract content before f:true/done if present
+        content = raw
+        if is_final:
+            # Check for markers at end (with possible content before)
+            for marker in ["\nf:true", " f:true", "\nDone.", " Done.", "Done.", "done", "Done", "f:true"]:
+                if raw.strip().endswith(marker):
+                    content = raw.strip()[:-len(marker)].strip()
+                    break
+            # If content is empty but there's text, use full raw
+            if not content and raw.strip():
+                content = raw.strip()
+        return is_final, content, []
 
     def _new_session_id(self) -> str:
         return str(uuid.uuid4())[:8]

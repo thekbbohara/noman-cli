@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
 from typing import Any
@@ -79,7 +80,19 @@ class OpenAIAdapter(BaseAdapter):
             if msg.tool_call_id:
                 m["tool_call_id"] = msg.tool_call_id
             if msg.tool_calls:
-                m["tool_calls"] = msg.tool_calls
+                openai_tool_calls = []
+                for tc in msg.tool_calls:
+                    if "function" in tc:
+                        openai_tool_calls.append(tc)
+                    elif "tool" in tc and "args" in tc:
+                        openai_tool_calls.append({
+                            "type": "function",
+                            "function": {
+                                "name": tc["tool"],
+                                "arguments": json.dumps(tc["args"]) if tc["args"] else "{}"
+                            }
+                        })
+                m["tool_calls"] = openai_tool_calls if openai_tool_calls else None
             result.append(m)
         return result
 
@@ -152,17 +165,41 @@ class OpenAIAdapter(BaseAdapter):
                     yield line[6:]
 
     async def probe_capabilities(self) -> ModelCapabilities:
-        """Probe provider capabilities."""
-        model_key = self._cfg.model.lower().split(".gguf")[0]
-        limit = DEFAULT_CONTEXT_LIMITS["default"]
-        for key in sorted(DEFAULT_CONTEXT_LIMITS.keys(), key=len, reverse=True):
-            if key == "default":
-                continue
-            if model_key.startswith(key.lower()) or model_key == key.lower():
-                limit = DEFAULT_CONTEXT_LIMITS[key]
-                break
+        """Probe provider capabilities from API."""
+        max_ctx = self._cfg.max_context_tokens
 
-        max_ctx = self._cfg.max_context_tokens or limit
+        # Try to get actual context from /models endpoint
+        if not max_ctx:
+            try:
+                client = await self._get_client()
+                resp = await client.get("/models")
+                if resp.status_code == 200:
+                    data = resp.json()
+                    model_name = self._cfg.model
+                    for m in data.get("data", []):
+                        if m.get("id") == model_name or m.get("model") == model_name:
+                            meta = m.get("meta", {})
+                            n_ctx_train = meta.get("n_ctx_train")
+                            if n_ctx_train:
+                                max_ctx = n_ctx_train
+                                logger.info("Found context size %d for %s", max_ctx, model_name)
+                                break
+            except Exception as e:
+                logger.debug("Could not probe model info: %s", e)
+
+        # Fallback to defaults
+        if not max_ctx:
+            model_key = self._cfg.model.lower().split(".gguf")[0]
+            limit = DEFAULT_CONTEXT_LIMITS["default"]
+            for key in sorted(DEFAULT_CONTEXT_LIMITS.keys(), key=len, reverse=True):
+                if key == "default":
+                    continue
+                if model_key.startswith(key.lower()) or model_key == key.lower():
+                    limit = DEFAULT_CONTEXT_LIMITS[key]
+                    break
+            max_ctx = limit
+            logger.info("Using fallback context size %d for model %s", max_ctx, self._cfg.model)
+        
         return ModelCapabilities(
             model_name=self._cfg.model,
             max_context_tokens=max_ctx,

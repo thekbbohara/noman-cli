@@ -7,6 +7,9 @@ import { createInterface } from 'node:readline'
 import type { GatewayEvent } from './gatewayTypes.js'
 import { CircularBuffer } from './lib/circularBuffer.js'
 
+const DEBUG = process.env.DEBUG === '1' || process.env.DEBUG === 'true'
+const debug = (...args: unknown[]) => DEBUG && console.error('[GATEWAY]', ...args)
+
 const MAX_GATEWAY_LOG_LINES = 200
 const MAX_LOG_LINE_BYTES = 4096
 const MAX_BUFFERED_EVENTS = 2000
@@ -95,9 +98,11 @@ export class GatewayClient extends EventEmitter {
   }
 
   start() {
+    debug('GatewayClient.start() called')
     const root = this.opts.pythonSrcRoot ?? process.env.NOMAN_PYTHON_SRC_ROOT ?? process.env.HERMES_PYTHON_SRC_ROOT ?? resolve(import.meta.dirname, '../../')
     const python = this.opts.python ?? resolvePython(root)
     const cwd = this.opts.cwd ?? process.env.NOMAN_CWD ?? process.env.HERMES_CWD ?? root
+    debug(`Resolved: python=${python}, cwd=${cwd}, root=${root}`)
     const env = { ...process.env }
     const pyPath = env.PYTHONPATH?.trim()
     env.PYTHONPATH = pyPath ? `${root}${delimiter}${pyPath}` : root
@@ -111,6 +116,7 @@ export class GatewayClient extends EventEmitter {
     this.stderrRl = null
 
     if (this.proc && !this.proc.killed && this.proc.exitCode === null) {
+      debug('Killing existing process')
       this.proc.kill()
     }
 
@@ -127,10 +133,21 @@ export class GatewayClient extends EventEmitter {
       this.publish({ type: 'gateway.start_timeout', payload: { cwd, python } })
     }, STARTUP_TIMEOUT_MS)
 
+    debug(`Spawning: python ${python} -m tui_gateway.entry in ${cwd}`)
     this.proc = spawn(python, ['-m', 'tui_gateway.entry'], { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] })
+
+    this.proc.on('spawn', () => debug('Process spawned'))
+    this.proc.on('error', (err) => debug('Process error:', err.message))
+    this.proc.on('exit', (code, signal) => debug(`Process exited with code: ${code}, signal: ${signal}`))
+
+    this.stderrRl = createInterface({ input: this.proc.stderr! })
+    this.stderrRl.on('line', raw => {
+      debug('stderr line:', raw)
+    })
 
     this.stdoutRl = createInterface({ input: this.proc.stdout! })
     this.stdoutRl.on('line', raw => {
+      debug('stdout line:', raw.slice(0, 200))
       try {
         this.dispatch(JSON.parse(raw))
       } catch {
@@ -176,10 +193,12 @@ export class GatewayClient extends EventEmitter {
   }
 
   private dispatch(msg: Record<string, unknown>) {
+    debug('dispatch() received:', JSON.stringify(msg).slice(0, 200))
     const id = msg.id as string | undefined
     const p = id ? this.pending.get(id) : undefined
 
     if (p) {
+      debug(`settling pending request ${id}`)
       this.settle(p, msg.error ? this.toError(msg.error) : null, msg.result)
 
       return
@@ -187,6 +206,7 @@ export class GatewayClient extends EventEmitter {
 
     if (msg.method === 'event') {
       const ev = asGatewayEvent(msg.params)
+      debug('event received:', ev?.type)
 
       if (ev) {
         this.publish(ev)
@@ -255,15 +275,25 @@ export class GatewayClient extends EventEmitter {
   }
 
   request<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
+    debug(`request(${method}) called, proc state:`, {
+      exists: !!this.proc,
+      killed: this.proc?.killed,
+      exitCode: this.proc?.exitCode,
+      stdin: !!this.proc?.stdin
+    })
+
     if (!this.proc?.stdin || this.proc.killed || this.proc.exitCode !== null) {
+      debug('proc not ready, calling start()')
       this.start()
     }
 
     if (!this.proc?.stdin) {
+      debug('stdin not available, rejecting')
       return Promise.reject(new Error('gateway not running'))
     }
 
     const id = `r${++this.reqId}`
+    debug(`sending request ${id}: ${method}`, params)
 
     return new Promise<T>((resolve, reject) => {
       const timeout = setTimeout(this.onTimeout, REQUEST_TIMEOUT_MS, id)
@@ -279,7 +309,9 @@ export class GatewayClient extends EventEmitter {
       })
 
       try {
-        this.proc!.stdin!.write(JSON.stringify({ id, jsonrpc: '2.0', method, params }) + '\n')
+        const req = JSON.stringify({ id, jsonrpc: '2.0', method, params })
+        debug(`writing to stdin:`, req.slice(0, 100))
+        this.proc!.stdin!.write(req + '\n')
       } catch (e) {
         const pending = this.pending.get(id)
 

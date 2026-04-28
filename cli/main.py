@@ -1211,23 +1211,39 @@ def _cmd_catalog(args) -> int:
     return 0
 
 
-def _launch_tui():
+def _launch_tui() -> int:
     import subprocess
     import os
+    import sys
+    import shutil
     
-    tui_dir = Path(__file__).parent / "tui_gateway"
-    if (tui_dir / "dist" / "entry.js").exists():
-        entry = tui_dir / "dist" / "entry.js"
+    tui_dir = Path(__file__).parent / "tui"
+    src_entry = tui_dir / "src" / "entry.tsx"
+    dist_entry = tui_dir / "dist" / "entry.js"
+    
+    if dist_entry.exists():
+        entry = dist_entry
+    elif src_entry.exists():
+        entry = src_entry
     else:
-        entry = tui_dir.parent / "tui" / "src" / "index.tsx"
+        logger.error("TUI not found. Run 'cd cli/tui && pnpm build' first.")
+        return 1
     
-    return subprocess.Popen(
-        ["npx", "tsx", str(entry)] if entry.suffix == ".tsx" else ["node", str(entry)],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        env={**os.environ, "NOMAN_GATEWAY": "1"}
-    )
+    env = {**os.environ, "NOMAN_GATEWAY": "1"}
+    
+    if sys.platform == "win32":
+        return subprocess.call(
+            ["node", str(entry)],
+            env=env
+        )
+    else:
+        if not shutil.which("script"):
+            logger.error("'script' command not found. Install it or run TUI manually.")
+            return 1
+        return subprocess.call(
+            ["script", "-q", "-e", "-c", f"node {entry}", "/dev/null"],
+            env=env
+        )
 
 
 def main(argv=None):
@@ -1450,14 +1466,8 @@ def main(argv=None):
 
         return 0
     else:
-        # Run TUI REPL
-        from cli.tui import run_tui
-        orch = _create_orchestrator(args)
-        if orch is None:
-            logger.error("Failed to create orchestrator")
-            return 1
-        run_tui(orch)
-        return 0
+        # Run TypeScript TUI REPL
+        return _launch_tui()
 
 
 # --- Voice command handlers ---

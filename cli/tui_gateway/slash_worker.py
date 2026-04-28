@@ -1,4 +1,5 @@
-"""Persistent slash-command worker — one HermesCLI per TUI session.
+"""
+Persistent slash-command worker — one HermesCLI per TUI session.
 
 Protocol: reads JSON lines from stdin {id, command}, writes {id, ok, output|error} to stdout.
 """
@@ -10,9 +11,10 @@ import json
 import os
 import sys
 
+from rich.console import Console
+
 import cli as cli_mod
 from cli import HermesCLI
-from rich.console import Console
 
 
 def _run(cli: HermesCLI, command: str) -> str:

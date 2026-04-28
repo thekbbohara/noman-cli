@@ -1,4 +1,5 @@
-"""WebSocket transport for the tui_gateway JSON-RPC server.
+"""
+WebSocket transport for the tui_gateway JSON-RPC server.
 
 Reuses :func:`tui_gateway.server.dispatch` verbatim so every RPC method, every
 slash command, every approval/clarify/sudo flow, and every agent event flows
@@ -46,7 +47,8 @@ except ImportError:  # pragma: no cover - starlette is a required install path
 
 
 class WSTransport:
-    """Per-connection WS transport.
+    """
+    Per-connection WS transport.
 
     ``write`` is safe to call from any thread *other than* the event loop
     thread that owns the socket. Pool workers (the only real caller) run in

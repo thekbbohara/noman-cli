@@ -11,7 +11,8 @@ from .transport import TeeTransport
 
 
 def _install_sidecar_publisher() -> None:
-    """Mirror every dispatcher emit to the dashboard sidebar via WS.
+    """
+    Mirror every dispatcher emit to the dashboard sidebar via WS.
 
     Activated by `HERMES_TUI_SIDECAR_URL`, set by the dashboard's
     ``/api/pty`` endpoint when a chat tab passes a ``channel`` query param.
@@ -30,7 +31,8 @@ def _install_sidecar_publisher() -> None:
 
 
 def _log_signal(signum: int, frame) -> None:
-    """Capture WHICH thread and WHERE a termination signal hit us.
+    """
+    Capture WHICH thread and WHERE a termination signal hit us.
 
     SIG_DFL for SIGPIPE kills the process silently the instant any
     background thread (TTS playback, beep, voice status emitter, etc.)
@@ -81,7 +83,8 @@ signal.signal(signal.SIGINT, signal.SIG_IGN)
 
 
 def _log_exit(reason: str) -> None:
-    """Record why the gateway subprocess is shutting down.
+    """
+    Record why the gateway subprocess is shutting down.
 
     Three exit paths (startup write fail, parse-error-response write fail,
     dispatch-response write fail, stdin EOF) all collapse into a silent
@@ -124,28 +127,43 @@ def main():
         _log_exit("startup write failed (broken stdout pipe before first event)")
         sys.exit(0)
 
+    _debug_log("Gateway ready sent, starting stdin loop")
+
     for raw in sys.stdin:
         line = raw.strip()
         if not line:
             continue
 
+        _debug_log(f"Received: {line[:100]}")
         try:
             req = json.loads(line)
         except json.JSONDecodeError:
+            _debug_log("JSON parse error")
             if not write_json({"jsonrpc": "2.0", "error": {"code": -32700, "message": "parse error"}, "id": None}):
                 _log_exit("parse-error-response write failed (broken stdout pipe)")
                 sys.exit(0)
             continue
 
         method = req.get("method") if isinstance(req, dict) else None
+        _debug_log(f"Dispatching method: {method}")
         resp = dispatch(req)
         if resp is not None:
+            _debug_log(f"Response: {str(resp)[:100]}")
             if not write_json(resp):
                 _log_exit(f"response write failed for method={method!r} (broken stdout pipe)")
                 sys.exit(0)
 
+    _debug_log("stdin loop ended")
     _log_exit("stdin EOF (TUI closed the command pipe)")
 
 
+def _debug_log(msg: str) -> None:
+    import os
+    if os.environ.get("DEBUG") == "1":
+        import sys
+        print(f"[GATEWAY-DEBUG] {msg}", file=sys.stderr, flush=True)
+
+
 if __name__ == "__main__":
+    _debug_log("Gateway entry starting")
     main()

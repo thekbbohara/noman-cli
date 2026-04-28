@@ -1,22 +1,17 @@
 """NoMan TUI Gateway - Minimal JSON-RPC server for TUI integration."""
 
-import atexit
-import json
 import logging
 import os
 import sys
 import threading
 import time
-import uuid
-from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from .transport import (
     StdioTransport,
     Transport,
     bind_transport,
-    current_transport,
     reset_transport,
 )
 
@@ -121,7 +116,7 @@ def handle_request(req: dict) -> dict | None:
     return fn(req.get("id"), req.get("params", {}))
 
 
-def dispatch(req: dict, transport: Optional[Transport] = None) -> dict | None:
+def dispatch(req: dict, transport: Transport | None = None) -> dict | None:
     """Route inbound RPCs."""
     t = transport or _stdio_transport
     token = bind_transport(t)
@@ -143,13 +138,14 @@ def _get_orchestrator():
     if _orchestrator_instance is not None:
         return _orchestrator_instance
 
-    from core.orchestrator import Orchestrator, OrchestratorConfig
+    from pathlib import Path
+
     from core.adapters import create_adapter
-    from core.tools import create_toolbus
     from core.context import ContextManager
     from core.memory import MemorySystem
+    from core.orchestrator import Orchestrator, OrchestratorConfig
+    from core.tools import create_toolbus
     from core.wiki import Wiki
-    from pathlib import Path
 
     config = _load_config()
 
@@ -284,3 +280,87 @@ def _session_close(rid: Any, params: dict) -> dict:
     if sid and sid in _sessions:
         del _sessions[sid]
     return _ok(rid, {"status": "closed"})
+
+
+@method("commands.catalog")
+def _commands_catalog(rid: Any, params: dict) -> dict:
+    """Return available slash commands."""
+    from pathlib import Path
+
+    noman_home = Path.home() / ".noman"
+    skills_dir = noman_home / "skills"
+
+    commands = [
+        {"id": "new", "label": "New Session", "description": "Start a new session"},
+        {"id": "resume", "label": "Resume Session", "description": "Resume a previous session"},
+        {"id": "model", "label": "Switch Model", "description": "Change the AI model"},
+        {"id": "reset", "label": "Reset", "description": "Reset current session"},
+        {"id": "help", "label": "Help", "description": "Show help"},
+        {"id": "exit", "label": "Exit", "description": "Exit NoMan"},
+    ]
+
+    if skills_dir.exists():
+        for skill_file in skills_dir.glob("*.md"):
+            commands.append({
+                "id": f"skill:{skill_file.stem}",
+                "label": f"Skill: {skill_file.stem}",
+                "description": f"Run skill: {skill_file.stem}"
+            })
+
+    return _ok(rid, {"commands": commands})
+
+
+@method("setup.status")
+def _setup_status(rid: Any, params: dict) -> dict:
+    """Return setup status."""
+    config_path = Path.home() / ".noman" / "config.toml"
+    has_config = config_path.exists()
+
+    return _ok(rid, {
+        "has_config": has_config,
+        "config_path": str(config_path) if has_config else None,
+    })
+
+
+@method("session.create")
+def _session_create(rid: Any, params: dict) -> dict:
+    """Create a new session."""
+    import uuid
+    sid = str(uuid.uuid4())
+    _sessions[sid] = {
+        "id": sid,
+        "created_at": time.time(),
+        "turns": 0,
+    }
+    return _ok(rid, {"session_id": sid})
+
+
+@method("session.list")
+def _session_list(rid: Any, params: dict) -> dict:
+    """List available sessions."""
+    sessions = []
+    for sid, data in _sessions.items():
+        sessions.append({
+            "id": sid,
+            "created_at": data.get("created_at"),
+            "turns": data.get("turns", 0),
+        })
+    return _ok(rid, {"sessions": sessions})
+
+
+@method("model.list")
+def _model_list(rid: Any, params: dict) -> dict:
+    """List available models."""
+    config = _load_config()
+    providers = config.get("providers", [])
+    models = []
+
+    if isinstance(providers, list):
+        for p in providers:
+            models.append({
+                "id": p.get("id", "default"),
+                "type": p.get("type", "openai"),
+                "model": p.get("model", "gpt-4o-mini"),
+            })
+
+    return _ok(rid, {"models": models})

@@ -1,4 +1,5 @@
-"""Transport abstraction for the tui_gateway JSON-RPC server.
+"""
+Transport abstraction for the tui_gateway JSON-RPC server.
 
 Historically the gateway wrote every JSON frame directly to real stdout.  This
 module decouples the I/O sink from the handler logic so the same dispatcher
@@ -25,7 +26,8 @@ from __future__ import annotations
 import contextvars
 import json
 import threading
-from typing import Any, Callable, Optional, Protocol, runtime_checkable
+from collections.abc import Callable
+from typing import Any, Protocol, runtime_checkable
 
 
 @runtime_checkable
@@ -39,7 +41,7 @@ class Transport(Protocol):
         """Release any resources owned by this transport."""
 
 
-_current_transport: contextvars.ContextVar[Optional[Transport]] = (
+_current_transport: contextvars.ContextVar[Transport | None] = (
     contextvars.ContextVar(
         "noman_gateway_transport",
         default=None,
@@ -47,12 +49,12 @@ _current_transport: contextvars.ContextVar[Optional[Transport]] = (
 )
 
 
-def current_transport() -> Optional[Transport]:
+def current_transport() -> Transport | None:
     """Return the transport bound for the current request, if any."""
     return _current_transport.get()
 
 
-def bind_transport(transport: Optional[Transport]):
+def bind_transport(transport: Transport | None):
     """Bind *transport* for the current context. Returns a token for :func:`reset_transport`."""
     return _current_transport.set(transport)
 
@@ -63,7 +65,8 @@ def reset_transport(token) -> None:
 
 
 class StdioTransport:
-    """Writes JSON frames to a stream (usually ``sys.stdout``).
+    """
+    Writes JSON frames to a stream (usually ``sys.stdout``).
 
     The stream is resolved via a callable so runtime monkey-patches of the
     underlying stream continue to work — this preserves the behaviour the
@@ -92,7 +95,8 @@ class StdioTransport:
 
 
 class TeeTransport:
-    """Mirrors writes to one primary plus N best-effort secondaries.
+    """
+    Mirrors writes to one primary plus N best-effort secondaries.
 
     The primary's return value (and exceptions) determine the result —
     secondaries swallow failures so a wedged sidecar never stalls the
@@ -102,7 +106,7 @@ class TeeTransport:
 
     __slots__ = ("_primary", "_secondaries")
 
-    def __init__(self, primary: "Transport", *secondaries: "Transport") -> None:
+    def __init__(self, primary: Transport, *secondaries: Transport) -> None:
         self._primary = primary
         self._secondaries = secondaries
 

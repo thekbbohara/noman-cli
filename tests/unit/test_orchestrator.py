@@ -57,7 +57,7 @@ async def test_prompt_assembler_system_prompt():
     tools = MagicMock()
     tools.list_tools.return_value = ["read_file", "edit_file"]
     pa = PromptAssembler(tools)
-    assert "Available tools" in pa.system_prompt
+    assert "Available:" in pa.system_prompt
     assert "read_file" in pa.available_tools
     assert "edit_file" in pa.available_tools
 

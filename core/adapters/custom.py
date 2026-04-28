@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
 from typing import Any
@@ -82,7 +83,19 @@ class CustomAdapter(BaseAdapter):
             if msg.tool_call_id:
                 m["tool_call_id"] = msg.tool_call_id
             if msg.tool_calls:
-                m["tool_calls"] = msg.tool_calls
+                openai_tool_calls = []
+                for tc in msg.tool_calls:
+                    if "function" in tc:
+                        openai_tool_calls.append(tc)
+                    elif "tool" in tc and "args" in tc:
+                        openai_tool_calls.append({
+                            "type": "function",
+                            "function": {
+                                "name": tc["tool"],
+                                "arguments": json.dumps(tc["args"]) if tc["args"] else "{}"
+                            }
+                        })
+                m["tool_calls"] = openai_tool_calls if openai_tool_calls else None
             result.append(m)
         return result
 

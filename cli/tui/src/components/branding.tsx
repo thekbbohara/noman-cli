@@ -27,11 +27,11 @@ export function Banner({ t }: { t: Theme }) {
         <ArtLines lines={logoLines} />
       ) : (
         <Text bold color={t.color.gold}>
-          {t.brand.icon} NOUS NOMAN
+          {t.brand.icon} NoMan
         </Text>
       )}
 
-      <Text color={t.color.dim}>{t.brand.icon} Nous Research · Messenger of the Digital Gods</Text>
+      <Text color={t.color.dim}>{t.brand.name} · Autonomous Coding Agent</Text>
     </Box>
   )
 }
@@ -99,7 +99,7 @@ export function SessionPanel({ info, sid, t }: SessionPanelProps) {
 
           <Text color={t.color.amber}>
             {info.model.split('/').pop()}
-            <Text color={t.color.dim}> · Nous Research</Text>
+            <Text color={t.color.dim}> · NoMan CLI</Text>
           </Text>
 
           <Text color={t.color.dim} wrap="truncate-end">

@@ -102,7 +102,12 @@ export function useSubmission(opts: UseSubmissionOptions) {
         turnController.bufRef = ''
         turnController.interrupted = false
 
-        gw.request<PromptSubmitResponse>('prompt.submit', { session_id: sid, text: submitText }).catch((e: Error) => {
+        console.error('[SUBMIT] Calling prompt.submit with sid:', sid, 'text:', submitText.slice(0, 50))
+        gw.request<PromptSubmitResponse>('prompt.submit', { session_id: sid, text: submitText })
+          .then(res => {
+            console.error('[SUBMIT] Got response:', JSON.stringify(res).slice(0, 200))
+          })
+          .catch((e: Error) => {
           if (isSessionBusyError(e)) {
             composerActions.enqueue(submitText)
             patchUiState({ busy: true, status: 'queued for next turn' })

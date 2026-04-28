@@ -7,8 +7,8 @@ import asyncio
 async def test_gateway_base():
     """Test GatewayBase initialization."""
     from core.gateway.base import GatewayBase, PlatformType, GatewayStatus
-    assert GatewayStatus.CONNECTED.value == "connected"
-    assert GatewayStatus.DISCONNECTED.value == "disconnected"
+    assert GatewayStatus.RUNNING.value == "running"
+    assert GatewayStatus.STOPPED.value == "stopped"
 
 
 async def test_message_router():

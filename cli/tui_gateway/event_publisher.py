@@ -1,4 +1,5 @@
-"""Best-effort WebSocket publisher transport for the PTY-side gateway.
+"""
+Best-effort WebSocket publisher transport for the PTY-side gateway.
 
 The dashboard's `/api/pty` spawns `hermes --tui` as a child process, which
 spawns its own ``tui_gateway.entry``.  Tool/reasoning/status events fire on
@@ -23,7 +24,6 @@ import json
 import logging
 import queue
 import threading
-from typing import Optional
 
 try:
     from websockets.sync.client import connect as ws_connect
@@ -43,10 +43,10 @@ class WsPublisherTransport:
     def __init__(self, url: str, *, connect_timeout: float = 2.0) -> None:
         self._url = url
         self._lock = threading.Lock()
-        self._ws: Optional[object] = None
+        self._ws: object | None = None
         self._dead = False
         self._q: queue.Queue[object] = queue.Queue(maxsize=_QUEUE_MAX)
-        self._worker: Optional[threading.Thread] = None
+        self._worker: threading.Thread | None = None
 
         if ws_connect is None:
             self._dead = True
