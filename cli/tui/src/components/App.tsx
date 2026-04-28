@@ -1,19 +1,32 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Box } from "ink";
 import { useInput } from "ink";
 import Input from "./Input.js";
 import Output from "./Output.js";
 import CommandPalette from "./CommandPalette.js";
+import { GatewayClient } from "../gateway.js";
 
 interface Message {
   role: "user" | "assistant";
   content: string;
 }
 
+interface Session {
+  id: string;
+  name: string;
+  created: number;
+}
+
 export default function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
+  const [gateway] = useState(() => new GatewayClient());
+  const [sessions, setSessions] = useState<Session[]>([]);
+
+  useEffect(() => {
+    gateway.getSessions().then(setSessions).catch(console.error);
+  }, [gateway]);
 
   const handleSelectCommand = (cmd: string) => {
     setShowPalette(false);
@@ -21,6 +34,12 @@ export default function App() {
       setMessages([]);
     } else if (cmd.startsWith("model:")) {
       console.log(`Switching to model: ${cmd.replace("model:", "")}`);
+    } else if (cmd.startsWith("session:")) {
+      const sessionId = cmd.replace("session:", "");
+      const session = sessions.find(s => s.id === sessionId);
+      if (session) {
+        console.log(`Switching to session: ${session.name}`);
+      }
     }
   };
 
