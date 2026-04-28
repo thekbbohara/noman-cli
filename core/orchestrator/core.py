@@ -16,6 +16,7 @@ from core.context import ContextManager
 from core.errors.circuit_breaker import CircuitBreaker, CircuitBreakerOpenError
 from core.memory import MemorySystem
 from core.tools import ToolBus
+from core.utils.prompt_budget import PromptBudgetConfig, PromptContributor, apply_prompt_part_budget
 from core.utils.retry import RetryConfig, RetryManager
 from core.wiki import Wiki
 
@@ -90,51 +91,89 @@ class PromptAssembler:
             summary = self._wiki.graph.summarize()
             wiki_info = f"""
 
-You have access to a knowledge graph/wiki subsystem (global + per-project).
-Graph state: {summary['entity_count']} entities, {summary['edge_count']} edges.
-Use wiki tools to query the graph, search pages, and maintain knowledge.
-"""
-        return f"""You are NoMan, an autonomous coding agent.
+Knowledge graph: {summary['entity_count']} entities, {summary['edge_count']} edges."""
 
-You operate within a token budget. Be concise and efficient.
+        return f"""You are NoMan, autonomous coding agent.
 
-Response format — you MUST return this structure:
-- If you need to use tools: `{{"content": "", "tool_calls": [...], "is_final_result": false}}`
-- If you have the answer: `{{"content": "your answer", "tool_calls": [], "is_final_result": true}}`
+TOKEN-SAVING FORMAT (always prefer):
+- Plain text over markdown: no headings, bullets, code fences, or speaker labels when possible
+- Short labels: prefer concise over verbose
+- Lean refs: `[tool 1] arg` not `ToolName(arg=value)` full form
+- Skip summaries: omit link destinations, label quotes, filler politeness
+
+RESPONSE format (required):
+- With tools: `{{"content": "", "tool_calls": [...], "is_final_result": false}}`
+- Final answer: `{{"content": "answer", "tool_calls": [], "is_final_result": true}}`
 
 RULES:
-- `is_final_result: false` → you MUST include tool_calls. Do not return empty tool_calls.
-- `is_final_result: true` → `content` must be the complete final answer. No tool_calls.
-- NEVER return `is_final_result: true` while still having tools to call.
-- ALWAYS call a tool if you need to check, search, read, or verify information.
+- `is_final_result: false` → MUST include tool_calls
+- `is_final_result: true` → content is complete answer, no tool_calls
+- NEVER finalize while tools remain to call
+- Call tools to check, search, read, verify — don't assume
 
-Available tools: {tools_list}{wiki_info}
+Available: {tools_list}{wiki_info}
 
-Workflow per turn:
-1. REASON - Think about what to do
-2. ACT - Execute a tool or respond
-3. OBSERVE - Process the result
-4. FINAL - When you have the complete answer, set is_final_result: true"""
+Workflow:
+1. REASON - think
+2. ACT - execute
+3. OBSERVE - process
+4. FINAL - set is_final_result: true when done"""
+
+    def _count_tokens(self, text: str) -> int:
+        """Estimate token count (rough ~4 chars per token)."""
+        return max(1, len(text) // 4)
 
     def assemble(
         self, session: Session, task: str, budget: int,
     ) -> tuple[list[Message], list[ToolDefinition]]:
         messages: list[Message] = []
 
+        # Build budget config
+        budget_config = PromptBudgetConfig(max_tokens=budget)
+
         # 1. System prompt (always first)
-        messages.append(Message(role="system", content=self.system_prompt))
+        system_text = self.system_prompt
+        system_tokens = self._count_tokens(system_text)
+
+        # Apply system budget with trimming if needed
+        if system_tokens > budget_config.system_budget:
+            # Trim system prompt
+            ratio = budget_config.system_budget / max(1, system_tokens)
+            chars = int(len(system_text) * ratio)
+            system_text = system_text[:chars].rsplit("\n", 1)[0]
+
+        messages.append(Message(role="system", content=system_text))
 
         # 2. Convert session.turns into messages (last 10 turns = 5 user/assistant pairs)
+        # Use budget config to trim history
+        history_contributors: list[PromptContributor] = []
+
         recent_turns = session.turns[-10:]  # 10 turns max to avoid token overflow
-        for turn in recent_turns:
-            # User input
-            messages.append(Message(role="user", content=turn.user_input))
-            # Assistant output (if any)
+        for i, turn in enumerate(recent_turns):
+            # Build history text
+            history_text = f"User: {turn.user_input}"
             if turn.assistant_output:
-                messages.append(Message(role="assistant", content=turn.assistant_output))
-            # Tool results (if any)
+                history_text += f"\nAssistant: {turn.assistant_output}"
             for result in turn.tool_results:
-                messages.append(Message(role="user", content=f"Result: {result}"))
+                history_text += f"\nResult: {result}"
+
+            history_contributors.append(PromptContributor(
+                key=f"turn_{i}",
+                original_text=history_text,
+                token_count=self._count_tokens(history_text),
+                order=i,
+                trim_priority=10,
+            ))
+
+        # Apply history budget with thresholded trimming
+        history_contributors = apply_prompt_part_budget(
+            history_contributors,
+            budget_config.history_budget,
+            self._count_tokens,
+        )
+
+        for contributor in history_contributors:
+            messages.append(Message(role="user", content=contributor.current_text))
 
         # 3. Current task
         messages.append(Message(role="user", content=task))
