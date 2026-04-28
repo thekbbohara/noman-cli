@@ -61,7 +61,7 @@ class NoManTUI(App):
     App { background: transparent; }
     #header { dock: top; height: 3; background: transparent; color: $text; }
     #status { width: 100%; content-align: center middle; }
-    #output { height: 100%; border: none; background: transparent; color: $text; overflow-y: auto; }
+    #output { height: 100%; border: none; background: transparent; color: $text; overflow-y: auto; allow-select: true; }
     #input-area { dock: bottom; height: 5; background: transparent; }
     #input { width: 100%; background: transparent; }
 
@@ -100,6 +100,7 @@ class NoManTUI(App):
 
     BINDINGS = [
         ("ctrl+c", "cancel", "Cancel"),
+        ("ctrl+shift+c", "copy_selection", "Copy"),
         ("ctrl+e", "expand", "Expand"),
         ("ctrl+d", "diff_view", "Diff"),
         ("ctrl+s", "save_output", "Save Output"),
@@ -130,7 +131,7 @@ class NoManTUI(App):
         with Container():
             with Horizontal(id="header"):
                 yield Static("NoMan v0.0.01", id="status")
-            yield TrackedRichLog(id="output", markup=True, wrap=True)
+            yield TrackedRichLog(id="output", markup=True, wrap=True, allow_select=True)
             # Command palette (hidden by default, floats above input)
             with Container(id="command-palette"):
                 yield Label("[dim]type to filter[/dim]", id="palette-title")
@@ -513,6 +514,16 @@ class NoManTUI(App):
         self.update_status()
         self.show_input()
 
+    def action_copy_selection(self) -> None:
+        """Copy output content to clipboard."""
+        try:
+            import pyperclip
+            output = self.query_one("#output", TrackedRichLog)
+            pyperclip.copy(output.content)
+            self.notify("Output copied to clipboard")
+        except ImportError:
+            self.notify("pip install pyperclip for copy support")
+
     def action_expand(self) -> None:
         self._expanded = not self._expanded
         output = self.query_one("#output", TrackedRichLog)
@@ -634,7 +645,7 @@ class NoManTUI(App):
                 self._notify_with_output("Usage: /wiki_search <query>", "warning")
                 return True
             return self._run_wiki_command("wiki_search_pages", {"query": query})
-         if task == "/wiki_lint":
+        if task == "/wiki_lint":
             return self._run_wiki_command("wiki_lint", {})
         if task == "/wiki_query":
             query = task[len("/wiki_query"):].strip()
