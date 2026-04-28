@@ -57,39 +57,40 @@ class TrackedRichLog(RichLog):
 
 class NoManTUI(App):
     CSS = """
-    /* Claude Code inspired theme */
-    Screen { background: $surface; }
-    App { background: $surface; }
+    /* Claude Code inspired - dark terminal theme */
+    Screen { background: #1e1e1e; }
+    App { background: #1e1e1e; }
     
     #header { 
         dock: top; 
-        height: 3; 
-        background: $surface; 
-        color: $text;
-        border-bottom: solid $accent;
+        height: 2; 
+        background: #1e1e1e; 
+        color: #e0e0e0;
+        border-bottom: solid #3b3b3b;
     }
     #status { 
         width: 100%; 
         content-align: center middle; 
-        color: $accent;
+        color: #10b981;  /* Claude green accent */
     }
     #output { 
         height: 100%; 
         border: none; 
-        background: $surface; 
-        color: $text; 
+        background: #1e1e1e; 
+        color: #d4d4d4; 
         overflow-y: auto; 
     }
     #input-area { 
         dock: bottom; 
         height: 5; 
-        background: $surface;
-        border-top: solid $accent;
+        background: #1e1e1e;
+        border-top: solid #3b3b3b;
     }
     #input { 
         width: 100%; 
-        background: $surface;
-        color: $text;
+        background: #262626;
+        color: #e0e0e0;
+        border: solid #3b3b3b;
     }
 
     #command-palette {
@@ -97,9 +98,9 @@ class NoManTUI(App):
         height: 10;
         width: 70;
         margin-bottom: 6;
-        background: $surface;
-        color: $text;
-        border: solid $accent;
+        background: #262626;
+        color: #e0e0e0;
+        border: solid #3b3b3b;
         padding: 1 2;
         display: none;
     }
@@ -109,19 +110,25 @@ class NoManTUI(App):
     #palette-title {
         text-align: center;
         width: 100%;
+        color: #6b7280;
     }
     #command-table {
         height: 100%;
     }
     #command-table > DataTable {
         border: none;
+        background: #262626;
+    }
+    #command-table > DataTable > .datatable--cursor {
+        background: #10b981;
+        color: #1e1e1e;
     }
     #command-table > DataTable.row:hover {
-        background: $accent 20%;
+        background: #374151;
     }
     #command-table > DataTable.row:focus {
-        background: $accent;
-        color: $text;
+        background: #10b981;
+        color: #1e1e1e;
     }
     """
 
