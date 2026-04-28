@@ -19,3 +19,5 @@ export const SETUP_COMMANDS = [
     suspend: withInkSuspended
   }
 ]
+
+export const setupCommands = SETUP_COMMANDS
