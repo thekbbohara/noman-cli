@@ -1,19 +1,10 @@
 import { withInkSuspended } from '@hermes/ink'
 
-import { launchHermesCommand } from '../../../lib/externalCli.js'
-import { runExternalSetup } from '../../setupHandoff.js'
-import type { SlashCommand } from '../types.js'
+import { launchNomanCommand } from '../../../lib/externalCli.js'
 
-export const setupCommands: SlashCommand[] = [
-  {
-    help: 'run full setup wizard (launches `hermes setup`)',
-    name: 'setup',
-    run: (arg, ctx) =>
-      void runExternalSetup({
-        args: ['setup', ...arg.split(/\s+/).filter(Boolean)],
-        ctx,
-        done: 'setup complete — starting session…',
-        launcher: launchHermesCommand,
+    help: 'run full setup wizard (launches `noman setup`)',
+
+        launcher: launchNomanCommand,
         suspend: withInkSuspended
       })
   }
