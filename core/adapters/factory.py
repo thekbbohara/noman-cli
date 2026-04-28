@@ -7,35 +7,171 @@ from typing import Any
 
 from core.adapters.anthropic import AnthropicAdapter
 from core.adapters.base import BaseAdapter
+from core.adapters.custom import CustomAdapter
+from core.adapters.dashscope import DashScopeAdapter
+from core.adapters.deepseek import DeepSeekAdapter
+from core.adapters.gemini import GeminiAdapter
+from core.adapters.glm import GLMAdapter
+from core.adapters.huggingface import HuggingFaceAdapter
+from core.adapters.kimi import KimiAdapter
+from core.adapters.minimax import MiniMaxAdapter
+from core.adapters.minimax_cn import MiniMaxCNAdapter
+from core.adapters.mistral import MistralAdapter
+from core.adapters.nvidia import NvidiaAdapter
 from core.adapters.openai import OpenAIAdapter
+from core.adapters.perplexity import PerplexityAdapter
+from core.adapters.sambanova import SambaNovaAdapter
+from core.adapters.together import TogetherAdapter
+from core.adapters.voyage import VoyageAdapter
+from core.adapters.xai import XAIAdapter
 from core.errors import ConfigError, ProviderConfigError
 
 logger = logging.getLogger(__name__)
 
+# ── Adapter class mapping ──
+
 ADAPTER_CLASSES = {
+    # OpenAI-compatible (generic)
     "openai": OpenAIAdapter,
-    "anthropic": AnthropicAdapter,
     "ollama": OpenAIAdapter,
     "groq": OpenAIAdapter,
     "lite llm": OpenAIAdapter,
+    "lite_llm": OpenAIAdapter,
+    "custom": CustomAdapter,
+    # Provider-specific adapters
+    "anthropic": AnthropicAdapter,
+    "gemini": GeminiAdapter,
+    "deepseek": DeepSeekAdapter,
+    "xai": XAIAdapter,
+    "huggingface": HuggingFaceAdapter,
+    "kimi": KimiAdapter,
+    "minimax": MiniMaxAdapter,
+    "minimax_cn": MiniMaxCNAdapter,
+    "dashscope": DashScopeAdapter,
+    "glm": GLMAdapter,
+    "mistral": MistralAdapter,
+    "together": TogetherAdapter,
+    "sambanova": SambaNovaAdapter,
+    "nvidia": NvidiaAdapter,
+    "voyage": VoyageAdapter,
+    "perplexity": PerplexityAdapter,
 }
 
 
 def create_adapter(config: dict[str, Any]) -> BaseAdapter:
-    """Create an adapter from config dict."""
-    provider_type = config.get("type", "openai").lower()
+    """Create an adapter from config dict.
+
+    Supports all registered providers. Provider type is determined by
+    config['type'] (lowercased). Falls back to 'openai' if not specified.
+
+    Args:
+        config: Provider configuration dict. Must include 'type' and 'api_key'.
+
+    Returns:
+        A BaseAdapter instance configured for the specified provider.
+
+    Raises:
+        ProviderConfigError: If required config fields are missing.
+        ConfigError: If the provider type is unknown.
+    """
+    provider_type = config.get("type", "openai").lower().strip()
     model = config.get("model", "")
 
+    # Map known provider types to their specific adapter class
     if provider_type == "anthropic":
         if not config.get("api_key"):
             raise ProviderConfigError("Anthropic adapter requires api_key")
         return AnthropicAdapter(config)
 
-    if provider_type in ("openai", "ollama", "groq"):
-        if not config.get("api_key") and provider_type != "ollama":
+    if provider_type == "gemini":
+        if not config.get("api_key"):
+            raise ProviderConfigError("Gemini adapter requires api_key")
+        return GeminiAdapter(config)
+
+    if provider_type == "deepseek":
+        if not config.get("api_key"):
+            raise ProviderConfigError("DeepSeek adapter requires api_key")
+        return DeepSeekAdapter(config)
+
+    if provider_type == "xai":
+        if not config.get("api_key"):
+            raise ProviderConfigError("xAI adapter requires api_key")
+        return XAIAdapter(config)
+
+    if provider_type == "huggingface":
+        if not config.get("api_key"):
+            raise ProviderConfigError("HuggingFace adapter requires api_key")
+        if not config.get("base_url"):
+            raise ProviderConfigError("HuggingFace adapter requires base_url")
+        return HuggingFaceAdapter(config)
+
+    if provider_type == "kimi":
+        if not config.get("api_key"):
+            raise ProviderConfigError("Kimi adapter requires api_key")
+        return KimiAdapter(config)
+
+    if provider_type == "minimax":
+        if not config.get("api_key"):
+            raise ProviderConfigError("MiniMax adapter requires api_key")
+        return MiniMaxAdapter(config)
+
+    if provider_type == "minimax_cn":
+        if not config.get("api_key"):
+            raise ProviderConfigError("MiniMax CN adapter requires api_key")
+        return MiniMaxCNAdapter(config)
+
+    if provider_type == "dashscope":
+        if not config.get("api_key"):
+            raise ProviderConfigError("DashScope adapter requires api_key")
+        return DashScopeAdapter(config)
+
+    if provider_type == "glm":
+        if not config.get("api_key"):
+            raise ProviderConfigError("GLM adapter requires api_key")
+        return GLMAdapter(config)
+
+    if provider_type == "mistral":
+        if not config.get("api_key"):
+            raise ProviderConfigError("Mistral adapter requires api_key")
+        return MistralAdapter(config)
+
+    if provider_type == "together":
+        if not config.get("api_key"):
+            raise ProviderConfigError("Together AI adapter requires api_key")
+        return TogetherAdapter(config)
+
+    if provider_type == "sambanova":
+        if not config.get("api_key"):
+            raise ProviderConfigError("SambaNova adapter requires api_key")
+        return SambaNovaAdapter(config)
+
+    if provider_type == "nvidia":
+        if not config.get("api_key"):
+            raise ProviderConfigError("NVIDIA adapter requires api_key")
+        return NvidiaAdapter(config)
+
+    if provider_type == "voyage":
+        if not config.get("api_key"):
+            raise ProviderConfigError("Voyage AI adapter requires api_key")
+        return VoyageAdapter(config)
+
+    if provider_type == "perplexity":
+        if not config.get("api_key"):
+            raise ProviderConfigError("Perplexity adapter requires api_key")
+        return PerplexityAdapter(config)
+
+    if provider_type == "custom":
+        if not config.get("base_url"):
+            raise ProviderConfigError("Custom adapter requires base_url")
+        return CustomAdapter(config)
+
+    # Generic OpenAI-compatible providers (ollama, groq, lite-llm, etc.)
+    if provider_type in ("openai", "ollama", "groq", "lite llm", "lite_llm"):
+        if provider_type != "ollama" and not config.get("api_key"):
             raise ProviderConfigError(f"{provider_type} adapter requires api_key")
         return OpenAIAdapter(config)
 
+    # Unknown provider type
     raise ConfigError(f"Unknown provider type: {provider_type}")
 
 
@@ -88,3 +224,8 @@ def get_registry() -> AdapterRegistry:
     if _default_registry is None:
         _default_registry = AdapterRegistry()
     return _default_registry
+
+
+def get_supported_providers() -> list[str]:
+    """Return a list of all supported provider type strings."""
+    return sorted(ADAPTER_CLASSES.keys())
