@@ -101,15 +101,16 @@ TOKEN-SAVING FORMAT (always prefer):
 - Lean refs: `[tool 1] arg` not `ToolName(arg=value)` full form
 - Skip summaries: omit link destinations, label quotes, filler politeness
 
-RESPONSE (JSON, required):
-- with tools: {"c": "", "t": [...], "f": false}
-- final: {"c": "answer", "t": [], "f": true}
+RESPONSE (two forms):
 
-RULES:
-- f:false → MUST have t
-- f:true → complete answer, no t
-- NEVER finalize with tools left
-- Call verify—don't assume
+1. With tools — staging + _____tool block:
+tool_name arg1 value1
+arg2 value2
+
+2. Final — plain answer or just "Done."
+
+No JSON. No tool_calls field. _____tool separator forces tool call.
+Omit staging for quick calls. Use "Done." for completion.
 
 Available: {tools_list}{wiki_info}
 
@@ -460,31 +461,61 @@ class Orchestrator:
 
     def _parse_response(
         self, raw_content: str, api_tool_calls: list,
-    ) -> tuple[bool, str, list]:
-        """Parse response with short keys: c=content, t=tool_calls, f=is_final_result."""
+) -> tuple[bool, str, list]:
+        """Parse response: staging+tool block or JSON with short keys."""
+        TOOL_SEPARATOR = "_____tool"
+        
         if not raw_content:
             return False, "", api_tool_calls or []
 
-        raw_content = raw_content.strip()
-        try:
-            parsed = json.loads(raw_content)
-        except (json.JSONDecodeError, ValueError):
-            return True, raw_content, []
+        raw = raw_content.strip()
 
-        if not isinstance(parsed, dict):
-            return True, raw_content, []
+        # Try JSON first (supports both c/t/f and full keys)
+        if raw.startswith("{"):
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, dict):
+                    is_final = bool(parsed.get("f", parsed.get("is_final_result", True)))
+                    content = parsed.get("c", parsed.get("content", "")) or ""
+                    calls = api_tool_calls or parsed.get("t", parsed.get("tool_calls", []))
+                    if is_final and calls:
+                        is_final = False
+                    return is_final, content, _flatten_tool_calls(calls)
+            except (json.JSONDecodeError, ValueError):
+                pass
 
-        # Support short keys: c=content, t=tool_calls, f=is_final_result
-        is_final = bool(parsed.get("f", parsed.get("is_final_result", True)))
-        content = parsed.get("c", parsed.get("content", "")) or ""
+        # Check for _____tool block: staging -> separator -> tool calls
+        if TOOL_SEPARATOR in raw:
+            lines = raw.split("\n")
+            tool_calls = []
+            staging = []
+            in_tool_block = False
 
-        # Check both "t" and "tool_calls"
-        parsed_calls = api_tool_calls or parsed.get("t", parsed.get("tool_calls", []))
-        parsed_calls = _flatten_tool_calls(parsed_calls)
+            for line in lines:
+                if line.strip() == TOOL_SEPARATOR:
+                    in_tool_block = True
+                    continue
+                if in_tool_block:
+                    # This is a tool call line
+                    parts = line.split()
+                    if parts and parts[0]:
+                        tool_name = parts[0].strip()
+                        args = {}
+                        for part in parts[1:]:
+                            if "=" in part:
+                                k, v = part.split("=", 1)
+                                args[k] = v
+                        if tool_name:
+                            tool_calls.append({"tool": tool_name, "args": args})
+                elif line.strip():
+                    staging.append(line.strip())
 
-        if is_final and parsed_calls:
-            is_final = False
-        return is_final, content, parsed_calls
+            if tool_calls:
+                return False, " ".join(staging), tool_calls
+
+        # Plain answer / "Done." is final
+        is_final = raw.strip() in ("Done.", "done", "Done") or len(raw.strip()) > 20
+        return is_final, raw, []
 
     def _new_session_id(self) -> str:
         return str(uuid.uuid4())[:8]
@@ -520,11 +551,12 @@ def _flatten_tool_calls(calls) -> list:
         if "function" in tc:
             result.append(tc)
         elif "name" in tc:
+            tool_name = tc["name"]
             result.append({
-                "id": tc.get("id", f"call_{tc['name']}"),
+                "id": tc.get("id", f"call_{tool_name}"),
                 "type": "function",
                 "function": {
-                    "name": tc["name"],
+                    "name": tool_name,
                     "arguments": tc.get("args") or tc.get("arguments") or "{}",
                 },
             })
