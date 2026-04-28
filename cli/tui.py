@@ -73,7 +73,7 @@ class NoManTUI(App):
         content-align: center middle; 
         color: $accent;
     }
-#output { 
+    #output { 
         height: 100%; 
         border: none; 
         background: $surface; 
@@ -131,7 +131,9 @@ class NoManTUI(App):
         ("ctrl+e", "expand", "Expand"),
         ("ctrl+d", "diff_view", "Diff"),
         ("ctrl+s", "save_output", "Save Output"),
-        ("f2", "switch_model", "Model"),
+        ("ctrl+0", "switch_model", "Model"),
+        ("ctrl+1", "switch_model_1", "Model 1"),
+        ("ctrl+2", "switch_model_2", "Model 2"),
         ("/", "toggle_palette", "Commands"),
     ]
 
@@ -558,6 +560,29 @@ class NoManTUI(App):
             output.wrap = True
         else:
             output.wrap = True  # always wrap for readability
+
+    def action_switch_model(self) -> None:
+        """Cycle to next model."""
+        self._show_model_selector()
+
+    def action_switch_model_1(self) -> None:
+        """Select model 1 (default)."""
+        self._set_model(1)
+
+    def action_switch_model_2(self) -> None:
+        """Select model 2 if available."""
+        self._set_model(2)
+
+    def _set_model(self, index: int) -> None:
+        """Set active model by index."""
+        output = self.query_one("#output", TrackedRichLog)
+        output.write(f"[accent]Switching to model {index}...[/accent]")
+        # TODO: implement model switching in orchestrator
+
+    def _show_model_selector(self) -> None:
+        """Show model selection."""
+        output = self.query_one("#output", TrackedRichLog)
+        output.write("[accent]Available models: 1) sonnet 2) haiku[/accent]")
 
     def action_diff_view(self) -> None:
         output = self.query_one("#output", TrackedRichLog)
